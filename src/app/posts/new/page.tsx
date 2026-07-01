@@ -534,11 +534,12 @@ export default function NewPostPage() {
                 );
               })}
             </div>
-            {form.platform === "tiktok" && (
+            {form.platform === "tiktok" && form.postType === "carousel" && (
               <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                TikTok carousels post via the TikTok Content Posting API — connect the
-                account&rsquo;s API access in Settings/docs.
+                Real TikTok photo carousels post via the official TikTok Content
+                Posting API — connect the account&rsquo;s API access first (see
+                docs/TIKTOK_API.md).
               </p>
             )}
           </fieldset>

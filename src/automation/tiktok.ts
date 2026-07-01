@@ -9,13 +9,16 @@
  *
  * Posting flow:
  *   1.  Open persistent browser context
- *   2.  Navigate to tiktok.com/creator-center/upload (fallback: tiktok.com/upload)
+ *   2.  Navigate to the TikTok Studio upload page
  *   3.  Verify the account is logged in
- *   4.  Set the video file on the file input (handles iframe)
+ *   4.  Set the video file on the input (handles iframe). NOTE: "carousel"
+ *       posts never reach this browser flow — TikTok's web uploader has no
+ *       photo-carousel feature, so carousels are routed to the official
+ *       Content Posting API (postCarouselViaApi) at the top of postToTikTok.
  *   5.  Wait for TikTok to finish processing the upload
  *   6.  Fill in the caption / description
  *   7.  If scheduledAt is in the future, attempt to schedule the post
- *   8.  Click Post
+ *   8.  Click Post (confirm the "Post now" dialog if it appears)
  *   9.  Wait for success / redirect
  *  10.  Close the browser context
  */
@@ -72,9 +75,9 @@ export async function postToTikTok(post: PostWithAssets): Promise<void> {
   const { account } = post
 
   // ── Native photo carousels via the official Content Posting API ─────────────
-  // TikTok's web uploader is video-only, so PHOTO carousels (media_type PHOTO)
-  // MUST go through the official API. Route them here before touching the
-  // browser. Videos continue through the browser-automation path below.
+  // TikTok's web/desktop uploader has NO photo-carousel feature (video-only), so
+  // a real swipeable carousel (media_type PHOTO) can ONLY be posted through the
+  // official API. Route carousels there; videos continue via browser automation.
   if (post.type === 'carousel' || post.type === 'photo') {
     await postCarouselViaApi(post)
     return
@@ -109,33 +112,16 @@ export async function postToTikTok(post: PostWithAssets): Promise<void> {
     // ── Step 3: Verify login ─────────────────────────────────────────────────
     await ensureTikTokLoggedIn(page, account)
 
-    // ── Step 4: Upload file(s) ───────────────────────────────────────────────
-    const isCarousel = post.type === 'carousel'
-    const assets = post.assets.sort((a, b) => a.order - b.order)
-
+    // ── Step 4: Resolve the video file to upload ─────────────────────────────
+    // Carousels are handled by the API path above; this browser flow only ever
+    // uploads a single video.
+    const assets = post.assets.slice().sort((a, b) => a.order - b.order)
     if (assets.length === 0) {
       throw new Error(`Post ${post.id} has no assets to upload`)
     }
-
-    if (isCarousel) {
-      // Attempt to switch to photo mode. TikTok's web Studio uploader is
-      // video-only in most regions/accounts — photo carousels are a mobile-app
-      // feature. If we can't find a photo/image file input, fail with a clear,
-      // actionable message rather than a cryptic "non-multiple input" error.
-      await switchToPhotoMode(page)
-      const imageInput = await findTikTokImageInput(page)
-      if (!imageInput) {
-        throw new Error(
-          "TikTok photo carousels aren't supported by TikTok's web uploader " +
-            '(it only accepts video). Post photo carousels from the TikTok mobile app, ' +
-            'or use a video for TikTok on web.',
-        )
-      }
-    }
-
-    const uploadPaths = assets.map(a => a.processedPath ?? a.filePath).filter(Boolean) as string[]
-    if (uploadPaths.length === 0) {
-      throw new Error(`Post ${post.id} assets are missing file paths`)
+    const uploadPath = (assets[0].processedPath ?? assets[0].filePath) as string
+    if (!uploadPath) {
+      throw new Error(`Asset for post ${post.id} is missing a file path`)
     }
 
     // TikTok's upload page sometimes embeds the file input in an iframe.
@@ -143,7 +129,7 @@ export async function postToTikTok(post: PostWithAssets): Promise<void> {
 
     const mainFileInputSel = await findFirstMatchingSelector(page, TIKTOK.fileInput)
     if (mainFileInputSel) {
-      await page.locator(mainFileInputSel).first().setInputFiles(isCarousel ? uploadPaths : uploadPaths[0])
+      await page.locator(mainFileInputSel).first().setInputFiles(uploadPath)
       fileInputLocated = true
     }
 
@@ -153,7 +139,7 @@ export async function postToTikTok(post: PostWithAssets): Promise<void> {
         if (frame === page.mainFrame()) continue
         const frameSel = await findFirstMatchingSelectorInFrame(frame, TIKTOK.fileInput)
         if (frameSel) {
-          await frame.locator(frameSel).first().setInputFiles(isCarousel ? uploadPaths : uploadPaths[0])
+          await frame.locator(frameSel).first().setInputFiles(uploadPath)
           fileInputLocated = true
           break
         }
@@ -247,35 +233,26 @@ export async function postToTikTok(post: PostWithAssets): Promise<void> {
 
 /**
  * Publish a TikTok photo carousel (media_type PHOTO) via the official Content
- * Posting API using the account's stored OAuth tokens.
+ * Posting API using the account's stored OAuth tokens. This is the ONLY way to
+ * post a real swipeable photo carousel — TikTok's web uploader can't do it.
  *
- * Flow:
  *   1. Get a valid access token (refreshing if expired). Throws an actionable
- *      error if the account has never been connected to the API.
- *   2. Publish the carousel with the caption. Local asset files are sent via
- *      FILE_UPLOAD; when the assets already have public URLs (URL-ingestion
- *      feature), pass those instead for PULL_FROM_URL — see contentPosting.ts.
+ *      "connect this account…" error if the account was never OAuth-connected.
+ *   2. Publish the images (FILE_UPLOAD) with the caption.
  *   3. Poll status to completion; throw on failure with TikTok's error.
  */
 async function postCarouselViaApi(post: PostWithAssets): Promise<void> {
   const { account } = post
 
-  // getValidAccessToken throws a clear "connect this account…" error when no
-  // API tokens are stored, and refreshes/persists an expired token otherwise.
   const accessToken = await getValidAccessToken(account)
 
   const assets = [...post.assets].sort((a, b) => a.order - b.order)
-  if (assets.length === 0) {
-    throw new Error(`Post ${post.id} has no assets to upload`)
-  }
-
-  // Prefer processed images; fall back to originals. These are local file paths;
-  // publishPhotoCarousel uploads them via FILE_UPLOAD.
   const filePaths = assets
-    .map(a => a.processedPath ?? a.filePath)
+    .filter((a) => a.type === 'image')
+    .map((a) => a.processedPath ?? a.filePath)
     .filter(Boolean) as string[]
   if (filePaths.length === 0) {
-    throw new Error(`Post ${post.id} assets are missing file paths`)
+    throw new Error(`Carousel post ${post.id} has no image assets`)
   }
 
   const result = await publishPhotoCarousel({
@@ -434,44 +411,6 @@ async function tryScheduleTikTok(page: Page, scheduledAt: Date): Promise<void> {
     }
   } catch (err) {
     console.warn('[tiktok] tryScheduleTikTok failed; posting immediately.', err)
-  }
-}
-
-/**
- * Switch the TikTok upload page to photo/carousel mode.
- * TikTok shows a "Photo" or "Image" tab on the upload page.
- * Falls back silently if the tab isn't found (some regions/versions lack it).
- */
-/**
- * Return a Playwright locator string for a file input that accepts images, or
- * null if the uploader is video-only. Used to detect photo-carousel support.
- */
-async function findTikTokImageInput(page: Page): Promise<string | null> {
-  const candidates = [
-    'input[type="file"][accept*="image"]',
-    'input[type="file"][accept*="jpeg"]',
-    'input[type="file"][accept*="png"]',
-    'input[type="file"]:not([accept*="video"])',
-  ]
-  for (const sel of candidates) {
-    if (await page.locator(sel).count() > 0) return sel
-  }
-  return null
-}
-
-async function switchToPhotoMode(page: Page): Promise<void> {
-  try {
-    const photoTab = page.getByRole('tab', { name: /photo/i }).or(
-      page.getByText(/^photo$/i)
-    ).or(
-      page.locator('[data-e2e="upload-photo-tab"], [class*="photo-tab"]')
-    )
-    if (await photoTab.count() > 0) {
-      await photoTab.first().click()
-      await page.waitForTimeout(1000)
-    }
-  } catch {
-    // Photo mode unavailable — proceed as video upload
   }
 }
 
