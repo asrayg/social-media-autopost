@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Type-check, test & build
+    runs-on: ubuntu-latest
+
+    # The Vitest suite is pure logic + media processing (no DB / Redis needed).
+    # `next build` collects page data at build time, which evaluates modules
+    # that read DATABASE_URL / REDIS_URL and the storage dir env vars — so we
+    # provide dummy values here rather than spinning up Postgres/Redis services.
+    # These are never connected to; they only need to be present and parseable.
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/autopost?schema=public
+      REDIS_URL: redis://localhost:6379
+      NEXTAUTH_SECRET: ci-dummy-secret-not-used-for-anything-real
+      NEXTAUTH_URL: http://localhost:3000
+      UPLOAD_DIR: ${{ github.workspace }}/uploads
+      SESSIONS_DIR: ${{ github.workspace }}/sessions
+      LOGS_DIR: ${{ github.workspace }}/logs
+      PROCESSED_DIR: ${{ github.workspace }}/processed
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create runtime directories
+        run: mkdir -p uploads sessions logs processed
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Build
+        run: npm run build

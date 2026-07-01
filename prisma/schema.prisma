@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  socialAccounts SocialAccount[]
+  posts         Post[]
+}
+
+model SocialAccount {
+  id          String   @id @default(cuid())
+  userId      String
+  platform    String   // instagram | tiktok
+  username    String
+  sessionPath String
+  status      String   @default("active") // active | needs_manual_login | failed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // ── Official TikTok Content Posting API (OAuth 2.0) ─────────────────────────
+  // All nullable so existing browser-automation accounts are unaffected. These
+  // are populated only after an account owner connects via the OAuth flow at
+  // /api/tiktok/oauth/start?accountId=<id>.
+  apiAccessToken    String?   // Bearer access token for open.tiktokapis.com
+  apiRefreshToken   String?   // Long-lived refresh token
+  apiTokenExpiresAt DateTime? // When apiAccessToken expires (UTC)
+  apiScope          String?   // Space/comma-separated granted scopes
+  apiOpenId         String?   // TikTok open_id for the authorized user
+  user        User     @relation(fields: [userId], references: [id])
+  posts       Post[]
+  @@unique([userId, platform, username])
+}
+
+model Post {
+  id              String   @id @default(cuid())
+  userId          String
+  socialAccountId String
+  platform        String   // instagram | tiktok
+  type            String   // image | carousel | reel | video
+  caption         String
+  scheduledAt     DateTime?
+  status          String   @default("draft") // draft | scheduled | processing | posted | failed
+  errorMessage    String?
+  bullJobId       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id])
+  account         SocialAccount @relation(fields: [socialAccountId], references: [id])
+  assets          PostAsset[]
+  attempts        PublishAttempt[]
+}
+
+model PostAsset {
+  id           String   @id @default(cuid())
+  postId       String
+  filePath     String
+  processedPath String?
+  type         String   // image | video
+  order        Int      @default(0)
+  mimeType     String?
+  sizeBytes    Int?
+  width        Int?
+  height       Int?
+  durationSecs Float?
+  post         Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model PublishAttempt {
+  id             String   @id @default(cuid())
+  postId         String
+  platform       String
+  status         String   // success | failed_login | failed_upload | failed_caption | failed_submit | posted_unknown
+  error          String?
+  screenshotPath String?
+  logs           String?
+  createdAt      DateTime @default(now())
+  post           Post     @relation(fields: [postId], references: [id])
+}
