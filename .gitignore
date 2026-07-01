@@ -53,3 +53,5 @@ scripts/run-post.ts
 scripts/verify-*.ts
 scripts/shoot-*.ts
 scripts/demo-*.ts
+scripts/tt-*.ts
+scripts/tt-dev-*.ts
