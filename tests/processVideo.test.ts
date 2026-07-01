@@ -2,27 +2,38 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import ffmpeg from "fluent-ffmpeg";
+import { path as ffmpegPath } from "@ffmpeg-installer/ffmpeg";
 import { getVideoMetadata, validateVideoFile } from "@/media/processVideo";
 
-const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 let tmpDir: string;
 let sampleMp4: string;
 let emptyFile: string;
 
-async function findSampleMp4(): Promise<string> {
-  const entries = await fs.readdir(UPLOADS_DIR);
-  const mp4 = entries.find((e) => e.toLowerCase().endsWith(".mp4"));
-  if (!mp4) throw new Error(`No .mp4 found in ${UPLOADS_DIR}`);
-  return path.join(UPLOADS_DIR, mp4);
+/**
+ * Generate a small, self-contained H.264 test video with ffmpeg so the suite
+ * doesn't depend on any file in uploads/ (which is gitignored and absent in CI).
+ */
+async function generateSampleMp4(outPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input("testsrc=size=320x240:rate=15:duration=1")
+      .inputFormat("lavfi")
+      .outputOptions(["-c:v libx264", "-pix_fmt yuv420p", "-movflags +faststart"])
+      .output(outPath)
+      .on("end", () => resolve())
+      .on("error", reject)
+      .run();
+  });
 }
 
 beforeAll(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "vid-test-"));
 
-  const src = await findSampleMp4();
   sampleMp4 = path.join(tmpDir, "sample.mp4");
-  await fs.copyFile(src, sampleMp4);
+  await generateSampleMp4(sampleMp4);
 
   emptyFile = path.join(tmpDir, "empty.mp4");
   await fs.writeFile(emptyFile, "");
