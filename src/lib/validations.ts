@@ -6,13 +6,18 @@
  */
 
 import { z } from "zod";
+import {
+  PLATFORMS as PLATFORM_VALUES,
+  POST_TYPES as POST_TYPE_VALUES,
+  validatePlatformAssets,
+} from "@/lib/platforms";
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-export const PLATFORMS = ["instagram", "tiktok", "twitter", "linkedin", "facebook"] as const;
+export const PLATFORMS = PLATFORM_VALUES;
 export type Platform = (typeof PLATFORMS)[number];
 
-export const POST_TYPES = ["image", "carousel", "reel", "video", "text"] as const;
+export const POST_TYPES = POST_TYPE_VALUES;
 export type PostType = (typeof POST_TYPES)[number];
 
 export const POST_STATUSES = [
@@ -73,6 +78,20 @@ export const CreatePostSchema = z.object({
     )
     .optional()
     .default([]),
+}).superRefine((value, ctx) => {
+  const error = validatePlatformAssets({
+    platform: value.platform,
+    type: value.type,
+    assets: value.assetPaths,
+  });
+
+  if (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["assetPaths"],
+      message: error,
+    });
+  }
 });
 
 export type CreatePostInput = z.infer<typeof CreatePostSchema>;

@@ -5,7 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Instagram,
+  Linkedin,
   Music2,
+  Twitter,
+  Youtube,
+  MessageCircle,
   ArrowLeft,
   Loader2,
   CheckCircle2,
@@ -32,11 +36,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster, toast } from "@/components/ui/toast";
+import type { Platform } from "@/lib/platforms";
 
 // ── Platform option ───────────────────────────────────────────────────────────
 
 interface PlatformOption {
-  id: "instagram" | "tiktok";
+  id: Platform;
   label: string;
   icon: React.ReactNode;
   dot: string;
@@ -55,14 +60,50 @@ const PLATFORMS: PlatformOption[] = [
     icon: <Music2 className="h-4 w-4" />,
     dot: "bg-zinc-900",
   },
+  {
+    id: "twitter",
+    label: "Twitter/X",
+    icon: <Twitter className="h-4 w-4" />,
+    dot: "bg-sky-500",
+  },
+  {
+    id: "linkedin",
+    label: "LinkedIn",
+    icon: <Linkedin className="h-4 w-4" />,
+    dot: "bg-blue-700",
+  },
+  {
+    id: "reddit",
+    label: "Reddit",
+    icon: <MessageCircle className="h-4 w-4" />,
+    dot: "bg-orange-600",
+  },
+  {
+    id: "youtube",
+    label: "YouTube",
+    icon: <Youtube className="h-4 w-4" />,
+    dot: "bg-red-600",
+  },
 ];
+
+function loginHost(platform: Platform): string {
+  const hosts: Record<Platform, string> = {
+    instagram: "instagram.com",
+    tiktok: "tiktok.com",
+    twitter: "x.com",
+    linkedin: "linkedin.com",
+    reddit: "reddit.com",
+    youtube: "youtube.com",
+  };
+  return hosts[platform];
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function NewAccountPage() {
   const router = useRouter();
 
-  const [platform, setPlatform] = useState<"instagram" | "tiktok">("instagram");
+  const [platform, setPlatform] = useState<Platform>("instagram");
   const [username, setUsername] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +174,7 @@ export default function NewAccountPage() {
                 <li>The browser window should be open on your screen.</li>
                 <li>
                   Navigate to{" "}
-                  {platform === "instagram" ? "instagram.com" : "tiktok.com"} if
+                  {loginHost(platform)} if
                   not already there.
                 </li>
                 <li>Log in with your credentials.</li>
@@ -190,7 +231,7 @@ export default function NewAccountPage() {
               </Label>
               <Select
                 value={platform}
-                onValueChange={(v) => setPlatform(v as "instagram" | "tiktok")}
+                onValueChange={(v) => setPlatform(v as Platform)}
               >
                 <SelectTrigger id="platform">
                   <SelectValue />

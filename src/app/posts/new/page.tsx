@@ -9,7 +9,11 @@ import {
   Check,
   CheckCircle2,
   Instagram,
+  Linkedin,
   Music2,
+  Twitter,
+  Youtube,
+  MessageCircle,
   Loader2,
   AlertCircle,
   Calendar,
@@ -30,11 +34,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Toaster, toast } from "@/components/ui/toast";
+import {
+  PLATFORMS,
+  PLATFORM_POST_TYPES,
+  defaultPostTypeForPlatform,
+  getPlatformPostTypeConfig,
+  postTypesForPlatform,
+  type Platform,
+  type PostType,
+} from "@/lib/platforms";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type Platform = "instagram" | "tiktok";
-type PostType = "image" | "carousel" | "reel" | "video";
 
 interface FormState {
   platform: Platform;
@@ -57,43 +67,27 @@ const CAPTION_LIMIT = 2200;
 
 // ── Post types per platform ───────────────────────────────────────────────────
 
-interface PostTypeOption {
-  id: PostType;
-  label: string;
-  icon: React.ReactNode;
-  description: string;
+function postTypeIcon(postType: PostType): React.ReactNode {
+  if (postType === "image") return <ImageIcon className="w-4 h-4" />;
+  if (postType === "carousel") return <LayoutGrid className="w-4 h-4" />;
+  if (postType === "text") return <FileText className="w-4 h-4" />;
+  return <Film className="w-4 h-4" />;
 }
 
-const IG_POST_TYPES: PostTypeOption[] = [
-  { id: "image", label: "Image", icon: <ImageIcon className="w-4 h-4" />, description: "Single photo post" },
-  { id: "carousel", label: "Carousel", icon: <LayoutGrid className="w-4 h-4" />, description: "Multiple images" },
-  { id: "reel", label: "Reel", icon: <Film className="w-4 h-4" />, description: "Short-form video" },
-];
-
-const TT_POST_TYPES: PostTypeOption[] = [
-  { id: "video", label: "Video", icon: <Film className="w-4 h-4" />, description: "TikTok video" },
-  { id: "carousel", label: "Carousel", icon: <LayoutGrid className="w-4 h-4" />, description: "Photo carousel" },
-];
-
-function postTypesForPlatform(p: Platform): PostTypeOption[] {
-  return p === "instagram" ? IG_POST_TYPES : TT_POST_TYPES;
+function allowsVideo(platform: Platform, postType: PostType): boolean {
+  return getPlatformPostTypeConfig(platform, postType)?.allowedAssetTypes.includes("video") ?? false;
 }
 
-function defaultPostType(p: Platform): PostType {
-  return p === "instagram" ? "image" : "video";
+function allowsMultiple(platform: Platform, postType: PostType): boolean {
+  return (getPlatformPostTypeConfig(platform, postType)?.maxAssets ?? 0) > 1;
 }
 
-function allowsVideo(postType: PostType): boolean {
-  return postType === "reel" || postType === "video";
+function maxFiles(platform: Platform, postType: PostType): number {
+  return getPlatformPostTypeConfig(platform, postType)?.maxAssets ?? 0;
 }
 
-function allowsMultiple(postType: PostType): boolean {
-  return postType === "carousel";
-}
-
-function maxFiles(postType: PostType): number {
-  if (postType === "carousel") return 10;
-  return 1;
+function requiresMedia(platform: Platform, postType: PostType): boolean {
+  return (getPlatformPostTypeConfig(platform, postType)?.minAssets ?? 0) > 0;
 }
 
 // ── Local datetime helpers ────────────────────────────────────────────────────
@@ -233,6 +227,7 @@ export default function NewPostPage() {
   const filteredAccounts = accounts.filter((a) => a.platform === form.platform);
   const selectedAccount = accounts.find((a) => a.id === form.accountId);
   const postTypeOptions = postTypesForPlatform(form.platform);
+  const selectedPostTypeConfig = getPlatformPostTypeConfig(form.platform, form.postType);
   const doneFiles = form.files.filter((f) => f.status === "done");
   const allFilesUploaded =
     form.files.length > 0 && form.files.every((f) => f.status === "done");
@@ -242,7 +237,7 @@ export default function NewPostPage() {
 
   const setPlatform = (p: Platform) => {
     const firstAccount = accounts.find((a) => a.platform === p);
-    const pt = defaultPostType(p);
+    const pt = defaultPostTypeForPlatform(p);
     setForm((f) => ({
       ...f,
       platform: p,
@@ -263,8 +258,9 @@ export default function NewPostPage() {
       case 0:
         return !!form.accountId;
       case 1:
-        // For text posts (no media required) we allow 0 files, but generally require media
-        return allFilesUploaded && !hasError;
+        return requiresMedia(form.platform, form.postType)
+          ? allFilesUploaded && !hasError
+          : !hasError;
       case 2:
         return (
           form.caption.trim().length > 0 &&
@@ -367,7 +363,7 @@ export default function NewPostPage() {
                 setForm({
                   platform: "instagram",
                   accountId: accounts.find((a) => a.platform === "instagram")?.id ?? "",
-                  postType: "image",
+                  postType: defaultPostTypeForPlatform("instagram"),
                   files: [],
                   caption: "",
                   scheduleMode: "now",
@@ -390,7 +386,7 @@ export default function NewPostPage() {
           <fieldset className="space-y-3">
             <legend className="text-sm font-medium text-foreground">Platform</legend>
             <div className="grid grid-cols-2 gap-3">
-              {(["instagram", "tiktok"] as Platform[]).map((p) => {
+              {PLATFORMS.map((p) => {
                 const selected = form.platform === p;
                 return (
                   <label key={p} className={radioCardClasses(selected)}>
@@ -404,11 +400,7 @@ export default function NewPostPage() {
                     />
                     <span className="flex items-center gap-3">
                       <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-surface text-foreground">
-                        {p === "instagram" ? (
-                          <Instagram className="h-5 w-5" />
-                        ) : (
-                          <Music2 className="h-5 w-5" />
-                        )}
+                        <PlatformIcon platform={p} className="h-5 w-5" />
                       </span>
                       <span className="flex flex-col">
                         <span className="flex items-center gap-1.5 text-sm font-medium capitalize text-foreground">
@@ -416,7 +408,7 @@ export default function NewPostPage() {
                           {p}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                          {p === "instagram" ? "Photos, carousels & reels" : "Videos & photo carousels"}
+                          {platformSummary(p)}
                         </span>
                       </span>
                     </span>
@@ -498,20 +490,21 @@ export default function NewPostPage() {
           <fieldset className="space-y-3">
             <legend className="text-sm font-medium text-foreground">Post type</legend>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {postTypeOptions.map((opt) => {
-                const selected = form.postType === opt.id;
+              {postTypeOptions.map((postType) => {
+                const opt = PLATFORM_POST_TYPES[form.platform][postType]!;
+                const selected = form.postType === postType;
                 return (
                   <label
-                    key={opt.id}
+                    key={postType}
                     className={cn(radioCardClasses(selected), "flex-col gap-2")}
                   >
                     <input
                       type="radio"
                       name="postType"
-                      value={opt.id}
+                      value={postType}
                       checked={selected}
                       onChange={() =>
-                        setForm((f) => ({ ...f, postType: opt.id, files: [] }))
+                        setForm((f) => ({ ...f, postType, files: [] }))
                       }
                       className="sr-only"
                     />
@@ -521,7 +514,7 @@ export default function NewPostPage() {
                         selected ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"
                       )}
                     >
-                      {opt.icon}
+                      {postTypeIcon(postType)}
                     </span>
                     <span className="text-sm font-medium text-foreground">{opt.label}</span>
                     <span className="text-xs leading-tight text-muted-foreground">
@@ -542,6 +535,12 @@ export default function NewPostPage() {
                 docs/TIKTOK_API.md).
               </p>
             )}
+            {["twitter", "linkedin", "reddit", "youtube"].includes(form.platform) && (
+              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Local validation and queueing are enabled. Live publishing for this platform still needs an API or browser automation module.
+              </p>
+            )}
           </fieldset>
         </div>
       );
@@ -555,22 +554,32 @@ export default function NewPostPage() {
             <div className="space-y-1">
               <h2 className="text-sm font-medium text-foreground">Upload media</h2>
               <p className="text-xs text-muted-foreground">
-                {allowsVideo(form.postType)
+                {allowsVideo(form.platform, form.postType)
                   ? "JPG, PNG, WEBP, MP4, MOV, AVI"
                   : "JPG, PNG, WEBP"}
               </p>
             </div>
             <Badge variant="secondary">
-              {form.postType === "carousel" ? "Up to 10 files" : "1 file"}
+              {selectedPostTypeConfig?.maxAssets === 0
+                ? "No media"
+                : selectedPostTypeConfig && selectedPostTypeConfig.maxAssets > 1
+                ? `Up to ${selectedPostTypeConfig.maxAssets} files`
+                : "1 file"}
             </Badge>
           </div>
 
-          <MediaUploader
-            maxFiles={maxFiles(form.postType)}
-            allowVideo={allowsVideo(form.postType)}
-            allowMultiple={allowsMultiple(form.postType)}
-            onFilesChange={handleFilesChange}
-          />
+          {selectedPostTypeConfig?.maxAssets === 0 ? (
+            <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
+              This post type does not use media.
+            </div>
+          ) : (
+            <MediaUploader
+              maxFiles={maxFiles(form.platform, form.postType)}
+              allowVideo={allowsVideo(form.platform, form.postType)}
+              allowMultiple={allowsMultiple(form.platform, form.postType)}
+              onFilesChange={handleFilesChange}
+            />
+          )}
 
           {form.files.length > 0 && !allFilesUploaded && !hasError && (
             <p className="flex items-center gap-1.5 text-xs text-amber-600">
@@ -948,11 +957,48 @@ function PlatformDot({ platform }: { platform: Platform }) {
     <span
       className={cn(
         "inline-block h-2.5 w-2.5 rounded-full",
-        platform === "instagram"
-          ? "bg-gradient-to-tr from-pink-500 to-orange-400"
-          : "bg-zinc-900"
+        platformDotClass(platform)
       )}
       aria-hidden="true"
     />
   );
+}
+
+function PlatformIcon({
+  platform,
+  className,
+}: {
+  platform: Platform;
+  className?: string;
+}) {
+  if (platform === "instagram") return <Instagram className={className} />;
+  if (platform === "tiktok") return <Music2 className={className} />;
+  if (platform === "twitter") return <Twitter className={className} />;
+  if (platform === "linkedin") return <Linkedin className={className} />;
+  if (platform === "youtube") return <Youtube className={className} />;
+  return <MessageCircle className={className} />;
+}
+
+function platformDotClass(platform: Platform): string {
+  const classes: Record<Platform, string> = {
+    instagram: "bg-gradient-to-tr from-pink-500 to-orange-400",
+    tiktok: "bg-zinc-900",
+    twitter: "bg-sky-500",
+    linkedin: "bg-blue-700",
+    reddit: "bg-orange-600",
+    youtube: "bg-red-600",
+  };
+  return classes[platform];
+}
+
+function platformSummary(platform: Platform): string {
+  const summaries: Record<Platform, string> = {
+    instagram: "Photos, carousels & reels",
+    tiktok: "Videos & photo carousels",
+    twitter: "Text, images & video",
+    linkedin: "Text, images & video",
+    reddit: "Text, images & video",
+    youtube: "Videos & shorts",
+  };
+  return summaries[platform];
 }

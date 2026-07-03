@@ -13,7 +13,7 @@ import {
   exchangeCodeForToken,
   persistTokens,
 } from "@/integrations/tiktok";
-import { TIKTOK_OAUTH_STATE_COOKIE } from "../start/route";
+import { TIKTOK_OAUTH_STATE_COOKIE } from "../constants";
 
 export const dynamic = "force-dynamic";
 

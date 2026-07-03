@@ -19,7 +19,7 @@ model User {
 model SocialAccount {
   id          String   @id @default(cuid())
   userId      String
-  platform    String   // instagram | tiktok
+  platform    String   // instagram | tiktok | twitter | linkedin | reddit | youtube
   username    String
   sessionPath String
   status      String   @default("active") // active | needs_manual_login | failed
@@ -43,8 +43,8 @@ model Post {
   id              String   @id @default(cuid())
   userId          String
   socialAccountId String
-  platform        String   // instagram | tiktok
-  type            String   // image | carousel | reel | video
+  platform        String   // instagram | tiktok | twitter | linkedin | reddit | youtube
+  type            String   // image | carousel | reel | video | text | short
   caption         String
   scheduledAt     DateTime?
   status          String   @default("draft") // draft | scheduled | processing | posted | failed

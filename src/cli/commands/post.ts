@@ -14,27 +14,39 @@ import { env } from "@/lib/env";
 import { addPostJob } from "@/lib/queue";
 import { postToInstagram } from "@/automation/instagram";
 import { postToTikTok } from "@/automation/tiktok";
+import { publishToTwitter } from "@/automation/twitter";
+import { publishToLinkedIn } from "@/automation/linkedin";
+import { publishToReddit } from "@/automation/reddit";
+import { publishToYouTube } from "@/automation/youtube";
 import { processImageForInstagram } from "@/media/processImage";
-import { processVideoForPlatform } from "@/media/processVideo";
+import { processVideoForPlatform, type VideoPlatform } from "@/media/processVideo";
 import { ingestUrl } from "@/lib/mediaIngest";
+import {
+  POST_TYPES,
+  PLATFORMS,
+  getPlatformPostTypeConfig,
+  postTypesForPlatform,
+  validatePlatformAssets,
+  type Platform,
+  type PostType,
+} from "@/lib/platforms";
 import { MVP_USER_ID, resolveAccount } from "../lib/accounts";
 import { markQueueUsed } from "../lib/runtime";
 import { printResult, withJson, wrap, isJsonMode, confirm, info } from "../lib/output";
 
 type PostWithAssets = Post & { account: SocialAccount; assets: PostAsset[] };
 
-/** Which post types each platform accepts. */
-const PLATFORM_TYPES: Record<string, string[]> = {
-  instagram: ["image", "carousel", "reel"],
-  // TikTok supports single videos and native photo carousels (via the API).
-  tiktok: ["video", "carousel"],
-};
+const ALL_TYPES = POST_TYPES;
 
-const ALL_TYPES = ["image", "carousel", "reel", "video"] as const;
+interface ResolvedAsset {
+  filePath: string;
+  type: "image" | "video";
+}
 
-/** Map a post type to the underlying asset media kind. */
-function assetTypeForPostType(type: string): "image" | "video" {
-  return type === "reel" || type === "video" ? "video" : "image";
+function inferAssetType(filePath: string): "image" | "video" {
+  const ext = path.extname(filePath).toLowerCase();
+  if ([".mp4", ".mov", ".avi", ".m4v", ".webm"].includes(ext)) return "video";
+  return "image";
 }
 
 /** Collector for repeatable `--media` flags. */
@@ -80,14 +92,13 @@ async function processAssetsInline(post: PostWithAssets): Promise<void> {
         });
         asset.processedPath = result.outputPath;
       } else if (asset.type === "video") {
-        if (platform !== "instagram" && platform !== "tiktok") {
-          throw new Error(`Unsupported platform "${platform}" for video`);
-        }
+        const videoPlatform =
+          platform === "youtube" && post.type === "short" ? "youtube_short" : platform;
         const result = await processVideoForPlatform(
           asset.filePath,
           env.PROCESSED_DIR,
           post.id,
-          platform
+          videoPlatform as VideoPlatform
         );
         await prisma.postAsset.update({
           where: { id: asset.id },
@@ -133,6 +144,14 @@ async function publishInline(post: PostWithAssets): Promise<PostWithAssets> {
       await postToInstagram(post);
     } else if (platform === "tiktok") {
       await postToTikTok(post);
+    } else if (platform === "twitter") {
+      await publishToTwitter(post);
+    } else if (platform === "linkedin") {
+      await publishToLinkedIn(post);
+    } else if (platform === "reddit") {
+      await publishToReddit(post);
+    } else if (platform === "youtube") {
+      await publishToYouTube(post);
     } else {
       throw new Error(`Unsupported platform "${platform}"`);
     }
@@ -205,7 +224,7 @@ export function registerPost(program: Command): void {
       .option("--draft", "Save as a draft without scheduling")
   ).action(
     wrap(async (opts: PostOptions) => {
-      const type = opts.type.toLowerCase();
+      const type = opts.type.toLowerCase() as PostType;
       if (!ALL_TYPES.includes(type as (typeof ALL_TYPES)[number])) {
         throw new Error(`Invalid --type "${opts.type}". Must be one of: ${ALL_TYPES.join(", ")}`);
       }
@@ -216,32 +235,20 @@ export function registerPost(program: Command): void {
 
       const media = opts.media ?? [];
       const mediaUrls = opts.mediaUrl ?? [];
-      const totalMedia = media.length + mediaUrls.length;
-      if (totalMedia === 0) {
-        throw new Error("At least one --media file or --media-url is required.");
-      }
-      if (totalMedia > 1 && type !== "carousel") {
-        throw new Error(
-          `Multiple media files are only valid for --type carousel (got ${totalMedia} for "${type}").`
-        );
-      }
-
       const account = await resolveAccount(opts.account);
-      const platform = account.platform.toLowerCase();
+      const platform = account.platform.toLowerCase() as Platform;
 
-      const allowed = PLATFORM_TYPES[platform];
-      if (!allowed) {
+      if (!PLATFORMS.includes(platform)) {
         throw new Error(`Unsupported account platform "${account.platform}".`);
       }
-      if (!allowed.includes(type)) {
-        throw new Error(
-          `Type "${type}" is not valid for ${platform}. Allowed: ${allowed.join(", ")}`
-        );
+      if (!getPlatformPostTypeConfig(platform, type)) {
+        const allowed = postTypesForPlatform(platform).join(", ");
+        throw new Error(`Type "${type}" is not valid for ${platform}. Allowed: ${allowed}`);
       }
 
       // Resolve media into local absolute paths. Order: all --media (local)
       // paths first, then all --media-url entries in declaration order.
-      const resolvedMedia: string[] = [];
+      const resolvedAssets: ResolvedAsset[] = [];
 
       // Local --media files.
       for (const m of media) {
@@ -251,7 +258,7 @@ export function registerPost(program: Command): void {
         } catch {
           throw new Error(`Media file not found: ${m}`);
         }
-        resolvedMedia.push(abs);
+        resolvedAssets.push({ filePath: abs, type: inferAssetType(abs) });
       }
 
       // Remote --media-url entries: download each into UPLOAD_DIR.
@@ -260,9 +267,9 @@ export function registerPost(program: Command): void {
           ? null
           : ora({ text: `Downloading ${url}…`, stream: process.stderr }).start();
         try {
-          const asset = await ingestUrl(url, resolvedMedia.length);
+          const asset = await ingestUrl(url, resolvedAssets.length);
           if (spinner) spinner.succeed(`Downloaded ${url} (${asset.filename}).`);
-          resolvedMedia.push(asset.filePath);
+          resolvedAssets.push({ filePath: asset.filePath, type: asset.type });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (spinner) spinner.fail(`Failed to download ${url}: ${message}`);
@@ -270,7 +277,14 @@ export function registerPost(program: Command): void {
         }
       }
 
-      const assetType = assetTypeForPostType(type);
+      const assetError = validatePlatformAssets({
+        platform,
+        type,
+        assets: resolvedAssets,
+      });
+      if (assetError) {
+        throw new Error(assetError);
+      }
 
       // Determine scheduling / mode.
       let scheduledAt: Date | null = null;
@@ -293,9 +307,9 @@ export function registerPost(program: Command): void {
           scheduledAt,
           status: opts.now ? "draft" : status, // set to draft first; publishInline flips to processing
           assets: {
-            create: resolvedMedia.map((filePath, i) => ({
-              filePath,
-              type: assetType,
+            create: resolvedAssets.map((asset, i) => ({
+              filePath: asset.filePath,
+              type: asset.type,
               order: i,
             })),
           },

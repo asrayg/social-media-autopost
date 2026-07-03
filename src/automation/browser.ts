@@ -68,16 +68,28 @@ export async function openAccountBrowser(sessionPath: string): Promise<BrowserCo
       ignoreDefaultArgs: ['--enable-automation'],
     })
   } catch {
-    // Chrome not installed — fall back to bundled Chromium, which DOES need the
-    // sandbox flags in some sandboxed CI/container environments.
-    context = await chromium.launchPersistentContext(sessionPath, {
-      headless: false,
-      viewport: { width: 1440, height: 1000 },
-      userAgent: CHROME_USER_AGENT,
-      acceptDownloads: true,
-      args: [...commonArgs, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-      ignoreDefaultArgs: ['--enable-automation'],
-    })
+    // Chrome not installed — fall back to bundled Chromium. Try without
+    // sandbox-disabling flags first; sites like Reddit block browsers launched
+    // with --no-sandbox before the user can complete manual login.
+    try {
+      context = await chromium.launchPersistentContext(sessionPath, {
+        headless: false,
+        viewport: { width: 1440, height: 1000 },
+        userAgent: CHROME_USER_AGENT,
+        acceptDownloads: true,
+        args: commonArgs,
+        ignoreDefaultArgs: ['--enable-automation'],
+      })
+    } catch {
+      context = await chromium.launchPersistentContext(sessionPath, {
+        headless: false,
+        viewport: { width: 1440, height: 1000 },
+        userAgent: CHROME_USER_AGENT,
+        acceptDownloads: true,
+        args: [...commonArgs, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        ignoreDefaultArgs: ['--enable-automation'],
+      })
+    }
   }
 
   // Inject a script that further obscures automation markers.

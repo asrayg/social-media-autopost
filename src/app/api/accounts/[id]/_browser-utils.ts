@@ -16,7 +16,8 @@ export const PLATFORM_LOGIN_URLS: Record<string, string> = {
   tiktok: "https://www.tiktok.com/login",
   twitter: "https://x.com/i/flow/login",
   linkedin: "https://www.linkedin.com/login",
-  facebook: "https://www.facebook.com/login",
+  reddit: "https://www.reddit.com/login/",
+  youtube: "https://accounts.google.com/",
 };
 
 /**
@@ -29,7 +30,8 @@ export const PLATFORM_CHECK_URLS: Record<string, string> = {
   tiktok: "https://www.tiktok.com/foryou",
   twitter: "https://x.com/home",
   linkedin: "https://www.linkedin.com/feed/",
-  facebook: "https://www.facebook.com/",
+  reddit: "https://www.reddit.com/",
+  youtube: "https://www.youtube.com/",
 };
 
 // ── Filesystem helpers ────────────────────────────────────────────────────────

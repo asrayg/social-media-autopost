@@ -35,8 +35,9 @@ import {
   info,
   isJsonMode,
 } from "../lib/output";
+import { PLATFORMS } from "@/lib/platforms";
 
-const SUPPORTED_PLATFORMS = ["instagram", "tiktok"] as const;
+const SUPPORTED_PLATFORMS = PLATFORMS;
 
 // ── accounts list ─────────────────────────────────────────────────────────────
 
@@ -216,8 +217,10 @@ function isLoginPage(url: string, platform: string): boolean {
       return lower.includes("/i/flow/login") || lower.includes("/login");
     case "linkedin":
       return lower.includes("/login") || lower.includes("/uas/login");
-    case "facebook":
-      return lower.includes("/login") || lower.includes("facebook.com/?");
+    case "reddit":
+      return lower.includes("/login") || lower.includes("/account/login");
+    case "youtube":
+      return lower.includes("accounts.google.com") || lower.includes("/signin");
     default:
       return true;
   }
@@ -244,10 +247,17 @@ function registerCheck(accounts: Command): void {
         ? null
         : ora({ text: "Checking session…", stream: process.stderr }).start();
 
-      const browser = await chromium.launchPersistentContext(account.sessionPath, {
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
+      let browser;
+      try {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: true,
+        });
+      } catch {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+      }
 
       let loggedIn = false;
       try {
