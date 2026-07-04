@@ -37,6 +37,7 @@ import {
   findFirstMatchingSelector,
   waitForFirstSelector,
 } from './selectors'
+import { postStoryViaAndroid } from './instagram-android'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,14 @@ export type PostWithAssets = Post & {
  */
 export async function postToInstagram(post: PostWithAssets): Promise<void> {
   const { account } = post
+
+  // ── Stories: mobile-app only ────────────────────────────────────────────────
+  // Instagram's web has NO story creation UI, so stories are posted by driving
+  // the Instagram Android app on a logged-in emulator (see instagram-android.ts).
+  if (post.type === 'story') {
+    await postStoryViaAndroid(post)
+    return
+  }
 
   let context: BrowserContext | undefined
   let page: Page | undefined

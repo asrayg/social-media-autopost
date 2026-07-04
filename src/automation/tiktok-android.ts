@@ -21,20 +21,32 @@
  * your AVD differs.
  */
 
-import { execFile } from 'child_process'
-import { promisify } from 'util'
-import { existsSync } from 'fs'
-import { homedir } from 'os'
-import path from 'path'
-import type { PostWithAssets } from './tiktok'
 
-const execFileAsync = promisify(execFile)
+import type { PostWithAssets } from './tiktok'
+import {
+  shell,
+  tap,
+  sleep,
+  typeText,
+  uiDump,
+  findNode,
+  findNodes,
+  hasText,
+  hasId,
+  waitForNode,
+  dismissColdStartDialogs,
+  ensureDeviceReady,
+  pushImages,
+  cleanupImages,
+  type Node,
+} from './android'
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
 const TT_PKG = process.env.TT_ANDROID_PKG ?? 'com.tiktok.lite.go'
-/** Optional `adb -s <serial>` target when several devices are attached. */
-const TT_SERIAL = process.env.TT_ANDROID_SERIAL
+
+/** `id/<x>` on the TikTok package → fully-qualified resource-id test. */
+const ttId = (a: string, id: string) => hasId(a, `${TT_PKG}:id/${id}`)
 
 /**
  * Screen-coordinate taps for the native (uiautomator-blind) editor + post
@@ -61,218 +73,6 @@ function env(name: string, dx: number, dy: number): [number, number] {
   return [dx, dy]
 }
 
-// ── adb plumbing ──────────────────────────────────────────────────────────────
-
-function resolveAdb(): string {
-  const candidates = [
-    process.env.ADB_PATH,
-    process.env.ANDROID_HOME && path.join(process.env.ANDROID_HOME, 'platform-tools', 'adb'),
-    process.env.ANDROID_SDK_ROOT && path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'adb'),
-    path.join(homedir(), 'Library/Android/sdk/platform-tools/adb'),
-    path.join(homedir(), 'Android/Sdk/platform-tools/adb'),
-  ].filter(Boolean) as string[]
-  for (const c of candidates) if (existsSync(c)) return c
-  return 'adb' // fall back to PATH
-}
-
-const ADB = resolveAdb()
-
-async function adb(args: string[], timeoutMs = 30_000): Promise<string> {
-  const full = TT_SERIAL ? ['-s', TT_SERIAL, ...args] : args
-  const { stdout } = await execFileAsync(ADB, full, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 })
-  return stdout
-}
-
-/** Run an `adb shell` command; the joined string is sent to the device shell. */
-async function shell(cmd: string, timeoutMs = 30_000): Promise<string> {
-  return adb(['shell', cmd], timeoutMs)
-}
-
-async function tap(x: number, y: number): Promise<void> {
-  await shell(`input tap ${x} ${y}`)
-}
-
-/**
- * Dismiss the onboarding / permission interstitials TikTok Lite shows on a cold
- * start (contacts access, notifications, etc.) by tapping their decline button.
- * Runs a few rounds since several can stack. Once declined they don't recur.
- * NOTE: the photo-access dialog is handled separately (we ALLOW that one), and
- * it only appears after tapping "+", so it can't be caught here.
- */
-async function dismissColdStartDialogs(): Promise<void> {
-  const decline = ["Don't allow", 'Deny', 'Not now', 'No thanks', 'Skip', 'Later', 'Maybe later']
-  for (let i = 0; i < 4; i++) {
-    const xml = await uiDump()
-    const btn = findNode(xml, (a) => decline.some((t) => a.includes(`text="${t}"`)))
-    if (!btn) return
-    await tap(btn.cx, btn.cy)
-    await sleep(1_500)
-  }
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-/**
- * Type text into the focused field. `adb shell input text` uses %s for spaces
- * and the device shell would treat #, &, ; … specially, so escape them.
- */
-async function typeText(text: string): Promise<void> {
-  const arg = text
-    .replace(/ /g, '%s')
-    .replace(/(["\\'`$&|;<>()#!*?~{}])/g, '\\$1')
-  await shell(`input text ${arg}`)
-}
-
-// ── uiautomator ────────────────────────────────────────────────────────────────
-
-interface Node {
-  cx: number
-  cy: number
-  bounds: [number, number, number, number]
-  attrs: string
-}
-
-/** Dump the current view hierarchy and return the raw XML. */
-async function uiDump(): Promise<string> {
-  await shell('uiautomator dump /sdcard/autopost-ui.xml')
-  return adb(['shell', 'cat /sdcard/autopost-ui.xml'])
-}
-
-/** Find the first node whose opening tag matches `test`, with its tap center. */
-function findNode(xml: string, test: (attrs: string) => boolean): Node | null {
-  const re = /<node\b([^>]*?)bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(xml))) {
-    const attrs = m[1]
-    if (!test(attrs)) continue
-    const [x1, y1, x2, y2] = [m[2], m[3], m[4], m[5]].map(Number)
-    return { cx: (x1 + x2) >> 1, cy: (y1 + y2) >> 1, bounds: [x1, y1, x2, y2], attrs }
-  }
-  return null
-}
-
-/** All nodes matching `test`, in document (grid) order, each with a tap center. */
-function findNodes(xml: string, test: (attrs: string) => boolean): Node[] {
-  const re = /<node\b([^>]*?)bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/g
-  const out: Node[] = []
-  let m: RegExpExecArray | null
-  while ((m = re.exec(xml))) {
-    const attrs = m[1]
-    if (!test(attrs)) continue
-    const [x1, y1, x2, y2] = [m[2], m[3], m[4], m[5]].map(Number)
-    out.push({ cx: (x1 + x2) >> 1, cy: (y1 + y2) >> 1, bounds: [x1, y1, x2, y2], attrs })
-  }
-  return out
-}
-
-const hasText = (attrs: string, t: string) => attrs.includes(`text="${t}`)
-const hasId = (attrs: string, id: string) => attrs.includes(`resource-id="${TT_PKG}:id/${id}"`)
-
-/** Poll for a node up to `timeoutMs`, re-dumping between attempts. */
-async function waitForNode(
-  test: (attrs: string) => boolean,
-  timeoutMs = 20_000,
-  intervalMs = 1_500,
-): Promise<Node> {
-  const deadline = Date.now() + timeoutMs
-  let last: string = ''
-  for (;;) {
-    last = await uiDump()
-    const node = findNode(last, test)
-    if (node) return node
-    if (Date.now() > deadline) {
-      throw new Error('uiautomator: node not found within timeout')
-    }
-    await sleep(intervalMs)
-  }
-}
-
-// ── Device readiness ───────────────────────────────────────────────────────────
-
-async function ensureDeviceReady(): Promise<void> {
-  let state = ''
-  try {
-    state = (await adb(['get-state'], 8_000)).trim()
-  } catch {
-    throw new Error(
-      'No Android emulator/device reachable via adb. Start the TikTok AVD ' +
-        '(and make sure TikTok Lite is logged in) before posting carousels.',
-    )
-  }
-  if (state !== 'device') {
-    throw new Error(`Android device not ready (adb state="${state}").`)
-  }
-  const booted = (await shell('getprop sys.boot_completed', 8_000)).trim()
-  if (booted !== '1') {
-    throw new Error('Android emulator is still booting; try again shortly.')
-  }
-  const pkgs = await shell(`pm list packages ${TT_PKG}`, 8_000)
-  if (!pkgs.includes(TT_PKG)) {
-    throw new Error(
-      `${TT_PKG} is not installed on the emulator. Install TikTok Lite from ` +
-        'the Play Store and log in, then retry.',
-    )
-  }
-}
-
-// ── Image staging ──────────────────────────────────────────────────────────────
-
-/**
- * Push carousel images into the emulator gallery and media-scan them.
- *
- * TikTok's picker sorts photos newest-first, so we push in REVERSE (last asset
- * first, first asset last) with a small gap between pushes. That makes
- * `localPaths[0]` the most-recently-added photo — i.e. the first tile in the
- * grid — so selecting tiles in grid order reproduces the asset order.
- */
-async function pushImages(localPaths: string[]): Promise<string[]> {
-  // Clear any stragglers from a previous crashed run so the newest-first sort
-  // only ever surfaces this run's images.
-  await shell('rm -f /sdcard/Pictures/autopost-*.jpg').catch(() => {})
-  const remote: string[] = []
-  // Push in REVERSE asset order and wait for EACH image to be indexed before
-  // pushing the next. MediaStore sorts the picker by date_added DESC, so
-  // serialising the inserts makes date_added increase with push order — i.e.
-  // the last-pushed (asset[0]) becomes the first tile, giving grid order ==
-  // asset order. (Firing all the async media-scans at once scrambles it.)
-  for (let i = localPaths.length - 1; i >= 0; i--) {
-    const dest = `/sdcard/Pictures/autopost-${String(i).padStart(3, '0')}.jpg`
-    await adb(['push', localPaths[i], dest])
-    await shell(
-      `am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://${dest}`,
-    )
-    await waitForIndexed(dest)
-    remote.push(dest)
-  }
-  // Let the picker's date_added ordering settle before opening it.
-  await sleep(1_500)
-  return remote
-}
-
-/** Poll MediaStore until `dest` has an image row (so date_added is ordered). */
-async function waitForIndexed(dest: string, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const out = await shell(
-      `content query --uri content://media/external/images/media ` +
-        `--projection _id --where "_data='${dest}'"`,
-    ).catch(() => '')
-    if (out.includes('_id=')) return
-    if (Date.now() > deadline) return // best effort — don't hang the post
-    await sleep(400)
-  }
-}
-
-async function cleanupImages(remotePaths: string[]): Promise<void> {
-  for (const p of remotePaths) {
-    try {
-      await shell(`rm -f ${p}`)
-    } catch {
-      /* best effort */
-    }
-  }
-}
-
 // ── Public API ──────────────────────────────────────────────────────────────────
 
 /**
@@ -293,7 +93,7 @@ export async function postCarouselViaAndroid(post: PostWithAssets): Promise<void
     )
   }
 
-  await ensureDeviceReady()
+  await ensureDeviceReady(TT_PKG)
 
   const remote = await pushImages(images)
   try {
@@ -319,7 +119,7 @@ export async function postCarouselViaAndroid(post: PostWithAssets): Promise<void
 
     // 2. The "+" opens the gallery picker directly (a "Camera" button above the
     //    grid). Wait for it and make sure multi-select is enabled.
-    const multi = await waitForNode((a) => hasId(a, 'bsj'), 25_000)
+    const multi = await waitForNode((a) => ttId(a, 'bsj'), 25_000)
     if (multi.attrs.includes('checked="false"')) {
       await tap(multi.cx, multi.cy)
       await sleep(1_200)
@@ -347,7 +147,7 @@ export async function postCarouselViaAndroid(post: PostWithAssets): Promise<void
     //    photos sort after them and are ignored.
     let circles: Node[] = []
     for (let i = 0; i < 10; i++) {
-      circles = findNodes(await uiDump(), (a) => hasId(a, 'b9j'))
+      circles = findNodes(await uiDump(), (a) => ttId(a, 'b9j'))
       if (circles.length >= images.length) break
       await sleep(1_500)
     }
@@ -419,3 +219,4 @@ export async function postCarouselViaAndroid(post: PostWithAssets): Promise<void
     await cleanupImages(remote)
   }
 }
+

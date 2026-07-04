@@ -51,9 +51,16 @@ export const PLATFORM_POST_TYPES: Record<
       maxAssets: 1,
       allowedAssetTypes: ["video"],
     },
-    // NOTE: Instagram Stories are mobile-app only — the web has no story creation
-    // (the Create menu offers no Story option), so they can't be posted via
-    // browser automation. Facebook Stories work; Instagram Stories do not.
+    // NOTE: Instagram Stories are mobile-app only (the web has no story creation),
+    // so they are posted by driving the Instagram Android app on a logged-in
+    // emulator — see src/automation/instagram-android.ts.
+    story: {
+      label: "Story",
+      description: "24-hour story (photo or video) — posted via Android emulator",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["image", "video"],
+    },
   },
   tiktok: {
     video: {
