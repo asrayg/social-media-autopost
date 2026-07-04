@@ -72,23 +72,16 @@ export async function publishToFacebook(post: PostWithAssets): Promise<void> {
     await postButton.waitFor({ state: 'visible', timeout: 20_000 })
     await postButton.click()
 
-    const feedPage = page
-    await Promise.race([
-      feedPage
-        .getByRole('dialog', { name: /create post/i })
-        .waitFor({ state: 'hidden', timeout: 30_000 }),
-      feedPage
-        .getByRole('textbox', { name: /what's on your mind/i })
-        .waitFor({ state: 'hidden', timeout: 30_000 }),
-    ]).catch(async () => {
-      // If a benign confirmation (e.g. "Save draft?"/notification) is blocking,
-      // dismiss it without touching any destructive action, then re-check.
-      await dismissBenignDialog(feedPage)
-      const dialogStillOpen = await feedPage
-        .locator('div[role="dialog"], div[contenteditable="true"][role="textbox"]')
-        .count()
-      if (dialogStillOpen > 0) {
-        throw new Error('Facebook post did not confirm and composer is still open')
+    // Success signal: the composer dialog closes, so its "Post" button detaches.
+    // (The feed's always-present "What's on your mind?" box must NOT be used as
+    // the signal — it's there before and after posting.)
+    const activePage = page
+    await postButton.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
+      // A benign prompt (e.g. "Save draft?"/notifications) may be blocking —
+      // dismiss it without touching any destructive control, then re-check.
+      await dismissBenignDialog(activePage)
+      if (await postButton.isVisible().catch(() => false)) {
+        throw new Error('Facebook post did not confirm — the Post button is still visible')
       }
     })
   } catch (err) {

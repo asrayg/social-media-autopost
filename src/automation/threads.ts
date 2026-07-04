@@ -69,11 +69,12 @@ export async function publishToThreads(post: PostWithAssets): Promise<void> {
     }
 
     // ── Post ─────────────────────────────────────────────────────────────────
-    // Threads' primary action is usually labeled "Post". Prefer the accessible
-    // role match, fall back to a generic role="button" with the "Post" text.
-    const postButton = page
-      .getByRole('button', { name: /^post$/i })
-      .or(page.locator('div[role="button"]:has-text("Post")'))
+    // Scope to the composer dialog and match "Post" EXACTLY — otherwise the
+    // selector grabs "Post Options" or a Post button on the feed behind the modal
+    // (which intercepts the click).
+    const dialog = page.locator('div[role="dialog"]').last()
+    const postButton = dialog
+      .getByRole('button', { name: 'Post', exact: true })
       .first()
     await postButton.waitFor({ state: 'visible', timeout: 15_000 })
     await postButton.click({ timeout: 15_000 })
