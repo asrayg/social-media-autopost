@@ -120,6 +120,12 @@ export const BatchCreatePostSchema = z
       .array(z.string().min(1))
       .min(1, "select at least one account"),
     caption: z.string().max(2200, "caption too long").default(""),
+    /**
+     * Optional preferred post type (e.g. "story"). Applied per account only when
+     * that platform supports it for the media; otherwise the type is
+     * auto-resolved. Lets the UI post Instagram/Facebook Stories explicitly.
+     */
+    preferType: z.enum(POST_TYPE_VALUES).optional(),
     scheduledAt: z
       .string()
       .datetime({ message: "scheduledAt must be a valid ISO-8601 datetime" })
@@ -193,14 +199,19 @@ export const CreateAccountSchema = z.object({
   sessionPath: z.string().optional(),
 
   /**
-   * API credentials for non-browser platforms (currently Bluesky):
-   * { identifier, appPassword, service }. Stored on the account.
+   * Per-account credentials/config stored on the account:
+   *   - Bluesky API: { identifier, appPassword, service }
+   *   - Android emulator: { androidSerial } — which emulator this account posts
+   *     from (e.g. "emulator-5554"), so several accounts on the same platform
+   *     can each live on a separate AVD for emulator-only post types
+   *     (TikTok carousels, Instagram stories).
    */
   credentials: z
     .object({
       identifier: z.string().trim().optional(),
       appPassword: z.string().trim().optional(),
       service: z.string().trim().url().optional(),
+      androidSerial: z.string().trim().optional(),
     })
     .optional(),
 });

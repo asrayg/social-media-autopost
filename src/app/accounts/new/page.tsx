@@ -138,6 +138,7 @@ export default function NewAccountPage() {
   const [platform, setPlatform] = useState<Platform>("instagram");
   const [username, setUsername] = useState("");
   const [appPassword, setAppPassword] = useState("");
+  const [androidSerial, setAndroidSerial] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -145,6 +146,9 @@ export default function NewAccountPage() {
   const selectedPlatform = PLATFORMS.find((p) => p.id === platform)!;
   // Bluesky uses the AT Protocol API (handle + app password) — no browser login.
   const isBluesky = platform === "bluesky";
+  // Instagram Stories and TikTok carousels are posted via an Android emulator;
+  // an optional serial lets same-platform accounts target different emulators.
+  const supportsEmulator = platform === "instagram" || platform === "tiktok";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,19 +163,28 @@ export default function NewAccountPage() {
 
     try {
       const handle = username.trim().replace(/^@/, "");
+      const serial = supportsEmulator ? androidSerial.trim() : "";
 
       if (isBluesky) {
         await api.accounts.create({
           platform,
           username: handle,
-          credentials: { identifier: handle, appPassword: appPassword.trim() },
+          credentials: {
+            identifier: handle,
+            appPassword: appPassword.trim(),
+            ...(serial ? { androidSerial: serial } : {}),
+          },
         });
         toast.success("Bluesky account connected");
         setDone(true);
         return;
       }
 
-      const account = await api.accounts.create({ platform, username: handle });
+      const account = await api.accounts.create({
+        platform,
+        username: handle,
+        ...(serial ? { credentials: { androidSerial: serial } } : {}),
+      });
 
       // Browser platforms: immediately open the browser so the user can log in.
       try {
@@ -355,6 +368,29 @@ export default function NewAccountPage() {
                 <p className="text-xs text-muted-foreground">
                   Create one at Bluesky → Settings → App Passwords (not your main
                   password). Stored locally and used only to publish.
+                </p>
+              </div>
+            )}
+
+            {/* Android emulator serial (Instagram Stories / TikTok carousels) */}
+            {supportsEmulator && (
+              <div className="space-y-2">
+                <Label htmlFor="androidSerial">Android emulator serial (optional)</Label>
+                <Input
+                  id="androidSerial"
+                  value={androidSerial}
+                  onChange={(e) => setAndroidSerial(e.target.value)}
+                  placeholder="emulator-5554"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {selectedPlatform.label} Stories/carousels post through a
+                  logged-in Android emulator. Set a serial (from{" "}
+                  <code>adb devices</code>) to run this account on a specific
+                  emulator — needed only when several accounts on the same
+                  platform each use their own emulator. Leave blank to use the
+                  default.
                 </p>
               </div>
             )}

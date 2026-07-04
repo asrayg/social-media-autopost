@@ -82,8 +82,12 @@ function registerAdd(accounts: Command): void {
         "--app-password <password>",
         "Bluesky app password (from Settings → App Passwords). Connects instantly, no browser login."
       )
+      .option(
+        "--android-serial <serial>",
+        "Emulator this account posts from (e.g. emulator-5554) for emulator-only types (TikTok carousel, Instagram story). Use different emulators for same-platform accounts."
+      )
   ).action(
-    wrap(async (opts: { platform: string; username: string; appPassword?: string }) => {
+    wrap(async (opts: { platform: string; username: string; appPassword?: string; androidSerial?: string }) => {
       const platform = opts.platform.toLowerCase();
       const username = opts.username;
 
@@ -93,11 +97,15 @@ function registerAdd(accounts: Command): void {
         );
       }
 
-      // Bluesky stores API credentials instead of a browser session.
-      const credentials =
-        platform === "bluesky" && opts.appPassword
-          ? { identifier: username, appPassword: opts.appPassword.trim() }
-          : undefined;
+      // Store per-account credentials/config: Bluesky API creds and/or the
+      // emulator serial this account posts from.
+      const credentials: Record<string, string> = {};
+      if (platform === "bluesky" && opts.appPassword) {
+        credentials.identifier = username;
+        credentials.appPassword = opts.appPassword.trim();
+      }
+      if (opts.androidSerial) credentials.androidSerial = opts.androidSerial.trim();
+      const hasCredentials = Object.keys(credentials).length > 0;
 
       // Ensure the FK target exists before inserting the account.
       await ensureMvpUser();
@@ -126,11 +134,13 @@ function registerAdd(accounts: Command): void {
           platform,
           username,
           sessionPath,
-          credentials,
+          credentials: hasCredentials ? credentials : undefined,
           // Bluesky is usable immediately if an app password was provided;
           // otherwise it (like browser platforms) needs connecting first.
           status:
-            platform === "bluesky" && !credentials ? "needs_manual_login" : "active",
+            platform === "bluesky" && !credentials.appPassword
+              ? "needs_manual_login"
+              : "active",
         },
       });
 

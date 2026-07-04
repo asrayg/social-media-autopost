@@ -189,6 +189,9 @@ export default function NewPostPage() {
   const [result, setResult] = useState<BatchCreateResult | null>(null);
   // Bump to force-remount the MediaUploader (e.g. after "Create another post").
   const [uploaderKey, setUploaderKey] = useState(0);
+  // "Post as Story" — forces type=story on story-capable platforms (Instagram,
+  // Facebook), which post via the Android emulator. Auto-resolves elsewhere.
+  const [postAsStory, setPostAsStory] = useState(false);
 
   const [form, setForm] = useState<FormState>(initialForm);
 
@@ -224,10 +227,19 @@ export default function NewPostPage() {
   // Media kinds shared across every platform — drives per-account resolution.
   const mediaKinds = doneFiles.map((f) => ({ type: f.kind }));
 
+  // A story needs exactly one photo/video. Offer the toggle only when the media
+  // qualifies and at least one selected account is on a story-capable platform.
+  const storyCapable = selectedAccounts.some(
+    (a) => a.platform === "instagram" || a.platform === "facebook"
+  );
+  const storyEligible = storyCapable && mediaKinds.length === 1;
+  const preferType: PostType | undefined =
+    postAsStory && storyEligible ? "story" : undefined;
+
   // Per-selected-account resolution: which post type each account will use, or null.
   const resolutions = selectedAccounts.map((a) => ({
     account: a,
-    type: resolvePostTypeForPlatform(a.platform as Platform, mediaKinds),
+    type: resolvePostTypeForPlatform(a.platform as Platform, mediaKinds, preferType),
   }));
 
   // Accounts grouped by platform (only platforms that actually have accounts).
@@ -330,6 +342,7 @@ export default function NewPostPage() {
         scheduledAt,
         assetPaths,
         ...(Object.keys(options).length > 0 ? { options } : {}),
+        ...(preferType ? { preferType } : {}),
       });
 
       setResult(res);
@@ -653,6 +666,25 @@ export default function NewPostPage() {
               </p>
             )}
           </div>
+
+          {/* Post as Story (Instagram / Facebook, single photo or video) */}
+          {storyEligible && (
+            <label className="flex items-start gap-3 rounded-lg border border-border bg-surface p-4 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4"
+                checked={postAsStory}
+                onChange={(e) => setPostAsStory(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium text-foreground">Post as Story</span>
+                <span className="block text-xs text-muted-foreground">
+                  Publishes a 24-hour Story on Instagram/Facebook (via the Android
+                  emulator). Other selected platforms post normally.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* Platform-specific options — only shown when a relevant account is selected */}
           {(hasReddit || hasYoutube || hasPinterest) && (

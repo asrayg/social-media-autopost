@@ -38,6 +38,8 @@ import {
   ensureDeviceReady,
   pushImages,
   cleanupImages,
+  setDeviceSerial,
+  accountSerial,
   type Node,
 } from './android'
 
@@ -93,6 +95,8 @@ export async function postCarouselViaAndroid(post: PostWithAssets): Promise<void
     )
   }
 
+  // Target this account's emulator (lets same-platform accounts use separate AVDs).
+  setDeviceSerial(accountSerial(post.account.credentials))
   await ensureDeviceReady(TT_PKG)
 
   const remote = await pushImages(images)

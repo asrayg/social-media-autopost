@@ -38,7 +38,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { socialAccountIds, caption, scheduledAt, assetPaths, options } = parsed.data;
+    const { socialAccountIds, caption, scheduledAt, assetPaths, options, preferType } =
+      parsed.data;
 
     const accounts = await prisma.socialAccount.findMany({
       where: { id: { in: socialAccountIds }, userId: MVP_USER_ID },
@@ -60,7 +61,11 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const type = resolvePostTypeForPlatform(account.platform as Platform, mediaKinds);
+      const type = resolvePostTypeForPlatform(
+        account.platform as Platform,
+        mediaKinds,
+        preferType
+      );
       if (!type) {
         skipped.push({
           accountId,

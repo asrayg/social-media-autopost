@@ -298,10 +298,22 @@ export function getPlatformPostTypeConfig(
  */
 export function resolvePostTypeForPlatform(
   platform: Platform,
-  media: readonly { type: "image" | "video" }[]
+  media: readonly { type: "image" | "video" }[],
+  prefer?: PostType | null
 ): PostType | null {
   const hasVideo = media.some((m) => m.type === "video");
   const hasImage = media.some((m) => m.type === "image");
+
+  // Honour an explicit preference (e.g. "post as story") when this platform
+  // supports it for the given media; otherwise fall back to auto-resolution so a
+  // mixed cross-post still works on platforms that can't take the preferred type.
+  if (
+    prefer &&
+    PLATFORM_POST_TYPES[platform][prefer] &&
+    validatePlatformAssets({ platform, type: prefer, assets: media }) === null
+  ) {
+    return prefer;
+  }
 
   let candidates: PostType[];
   if (media.length === 0) candidates = ["text"];

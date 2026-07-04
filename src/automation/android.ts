@@ -18,8 +18,31 @@ import path from 'path'
 
 const execFileAsync = promisify(execFile)
 
-/** Optional `adb -s <serial>` target when several devices are attached. */
-const SERIAL = process.env.TT_ANDROID_SERIAL
+/**
+ * `adb -s <serial>` target. Emulator posts run one-at-a-time (a device has a
+ * single UI), so a module-level "current serial" is safe: a driver sets it from
+ * the account being posted, enabling different accounts of the SAME platform to
+ * live on different emulators. Defaults to the TT_ANDROID_SERIAL env var.
+ */
+let currentSerial: string | undefined = process.env.TT_ANDROID_SERIAL
+
+/** Point subsequent adb calls at a specific emulator (e.g. "emulator-5554"). */
+export function setDeviceSerial(serial?: string | null): void {
+  currentSerial = serial || process.env.TT_ANDROID_SERIAL || undefined
+}
+
+/**
+ * Read the emulator serial an account should post from. Store it on the
+ * account's `credentials` JSON as `androidSerial` to run several accounts of the
+ * same platform on separate emulators. Falls back to the env default.
+ */
+export function accountSerial(credentials: unknown): string | undefined {
+  if (credentials && typeof credentials === 'object') {
+    const s = (credentials as Record<string, unknown>).androidSerial
+    if (typeof s === 'string' && s.trim()) return s.trim()
+  }
+  return undefined
+}
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -40,7 +63,7 @@ function resolveAdb(): string {
 const ADB = resolveAdb()
 
 export async function adb(args: string[], timeoutMs = 30_000): Promise<string> {
-  const full = SERIAL ? ['-s', SERIAL, ...args] : args
+  const full = currentSerial ? ['-s', currentSerial, ...args] : args
   const { stdout } = await execFileAsync(ADB, full, {
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,

@@ -31,6 +31,8 @@ import {
   ensureDeviceReady,
   pushImages,
   cleanupImages,
+  setDeviceSerial,
+  accountSerial,
 } from './android'
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -101,6 +103,8 @@ export async function postStoryViaAndroid(post: PostWithAssets): Promise<void> {
   // A story is a single frame; use the first asset.
   const image = media[0]
 
+  // Target this account's emulator (lets same-platform accounts use separate AVDs).
+  setDeviceSerial(accountSerial(post.account.credentials))
   await ensureDeviceReady(IG_PKG)
 
   const remote = await pushImages([image])
