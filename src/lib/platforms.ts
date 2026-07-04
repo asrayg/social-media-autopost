@@ -278,6 +278,41 @@ export function getPlatformPostTypeConfig(
   return PLATFORM_POST_TYPES[platform][postType];
 }
 
+/**
+ * Given a set of media (or none) shared across a cross-post, pick the most
+ * appropriate post type for a platform — or null if the platform can't accept
+ * this content at all. Used to fan one submission out to many platforms.
+ *
+ * Preference per media kind:
+ *   - no media            → text
+ *   - video(s)            → reel > video > short  (IG uses reels; others use video)
+ *   - multiple images     → carousel > image
+ *   - single image        → image > story > carousel
+ */
+export function resolvePostTypeForPlatform(
+  platform: Platform,
+  media: readonly { type: "image" | "video" }[]
+): PostType | null {
+  const hasVideo = media.some((m) => m.type === "video");
+  const hasImage = media.some((m) => m.type === "image");
+
+  let candidates: PostType[];
+  if (media.length === 0) candidates = ["text"];
+  else if (hasVideo && !hasImage) candidates = ["reel", "video", "short", "story"];
+  else if (media.length > 1) candidates = ["carousel", "image"];
+  else candidates = ["image", "story", "carousel"];
+
+  for (const type of candidates) {
+    if (
+      PLATFORM_POST_TYPES[platform][type] &&
+      validatePlatformAssets({ platform, type, assets: media }) === null
+    ) {
+      return type;
+    }
+  }
+  return null;
+}
+
 export function validatePlatformAssets(input: {
   platform: Platform;
   type: PostType;

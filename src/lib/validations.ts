@@ -111,6 +111,49 @@ export const CreatePostSchema = z.object({
 export type CreatePostInput = z.infer<typeof CreatePostSchema>;
 
 /**
+ * Body for POST /api/posts/batch — cross-post to multiple accounts at once.
+ * The post type is auto-resolved per platform from the shared media.
+ */
+export const BatchCreatePostSchema = z
+  .object({
+    socialAccountIds: z
+      .array(z.string().min(1))
+      .min(1, "select at least one account"),
+    caption: z.string().max(2200, "caption too long").default(""),
+    scheduledAt: z
+      .string()
+      .datetime({ message: "scheduledAt must be a valid ISO-8601 datetime" })
+      .optional()
+      .nullable(),
+    assetPaths: z
+      .array(
+        z.object({
+          filePath: z.string().min(1),
+          filename: z.string().min(1),
+          size: z.number().int().positive(),
+          mimeType: z.string().min(1),
+          type: z.enum(["image", "video"]),
+          order: z.number().int().min(0).optional().default(0),
+        })
+      )
+      .optional()
+      .default([]),
+    options: z
+      .object({
+        subreddit: z.string().trim().max(100).optional(),
+        visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]).optional(),
+        board: z.string().trim().max(100).optional(),
+      })
+      .optional(),
+  })
+  .refine((v) => v.caption.trim().length > 0 || v.assetPaths.length > 0, {
+    message: "provide a caption or at least one media file",
+    path: ["caption"],
+  });
+
+export type BatchCreatePostInput = z.infer<typeof BatchCreatePostSchema>;
+
+/**
  * Query params accepted by GET /api/posts.
  */
 export const ListPostsQuerySchema = z.object({
