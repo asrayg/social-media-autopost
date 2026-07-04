@@ -27,8 +27,11 @@ export async function publishToLinkedIn(post: PostWithAssets): Promise<void> {
     await page.waitForTimeout(3_000)
     await ensureLinkedInLoggedIn(page, post.account.id)
 
+    // LinkedIn uses obfuscated class names — match the trigger by accessible
+    // name rather than class/text-substring.
     const startPost = page
-      .locator('button.share-box-feed-entry__trigger, button:has-text("Start a post"), button:has-text("Start post")')
+      .getByRole('button', { name: /start a post/i })
+      .or(page.locator('.share-box-feed-entry__trigger'))
       .first()
     await startPost.waitFor({ state: 'visible', timeout: 20_000 })
     await startPost.click()
@@ -64,8 +67,9 @@ export async function publishToLinkedIn(post: PostWithAssets): Promise<void> {
     }
 
     const postButton = page
-      .locator('button.share-actions__primary-action, button:has-text("Post")')
-      .last()
+      .getByRole('button', { name: /^post$/i })
+      .or(page.locator('.share-actions__primary-action'))
+      .first()
     await postButton.waitFor({ state: 'visible', timeout: 20_000 })
     await postButton.click()
 
