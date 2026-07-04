@@ -173,6 +173,9 @@ shortcuts are OS-aware). A few things to know before deploying:
 
 ## Quick start
 
+> For a detailed, troubleshooting-inclusive walkthrough see
+> [**docs/SETUP.md**](docs/SETUP.md).
+
 ### Prerequisites
 
 | Requirement | Version | Notes |
