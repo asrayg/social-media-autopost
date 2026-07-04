@@ -66,3 +66,4 @@ scripts/li-check.ts
 scripts/li-post.ts
 scripts/login-any.ts
 scripts/ensure-accounts.ts
+scripts/shoot-newpost.ts

@@ -44,8 +44,10 @@ export async function POST(req: NextRequest) {
       where: { id: { in: socialAccountIds }, userId: MVP_USER_ID },
     });
 
+    // Batch has no "draft" mode — a null scheduledAt means "post now", which we
+    // enqueue with zero delay so the worker publishes immediately.
     const scheduledAtDate = scheduledAt ? new Date(scheduledAt) : null;
-    const status = scheduledAtDate ? "scheduled" : "draft";
+    const status = "scheduled";
     const mediaKinds = assetPaths.map((a) => ({ type: a.type }));
 
     const created: unknown[] = [];
@@ -93,16 +95,15 @@ export async function POST(req: NextRequest) {
         include: { assets: { orderBy: { order: "asc" } }, account: true },
       });
 
-      if (status === "scheduled") {
-        try {
-          const job = await addPostJob(post.id, scheduledAtDate);
-          await prisma.post.update({
-            where: { id: post.id },
-            data: { bullJobId: job.id ?? null },
-          });
-        } catch (queueErr) {
-          console.error("[POST /api/posts/batch] enqueue failed", queueErr);
-        }
+      try {
+        // null scheduledAtDate → zero delay → the worker publishes immediately.
+        const job = await addPostJob(post.id, scheduledAtDate);
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { bullJobId: job.id ?? null },
+        });
+      } catch (queueErr) {
+        console.error("[POST /api/posts/batch] enqueue failed", queueErr);
       }
 
       created.push(post);
