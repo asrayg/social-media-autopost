@@ -57,3 +57,6 @@ scripts/tt-*.ts
 scripts/tt-dev-*.ts
 scripts/run-any.ts
 scripts/li-*.ts
+scripts/stealth-check.ts
+scripts/li-check.ts
+*.cookies.json

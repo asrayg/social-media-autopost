@@ -10,9 +10,17 @@
 
 import path from 'path'
 import fs from 'fs/promises'
-import { chromium, BrowserContext, Page } from 'playwright'
+import type { BrowserContext, Page } from 'playwright'
+// playwright-extra wraps Playwright's chromium so the stealth plugin can inject
+// its evasions (navigator.webdriver, chrome runtime, WebGL vendor, permissions,
+// plugins, etc.) — this is what keeps automated sessions from being flagged and
+// invalidated (LinkedIn especially).
+import { chromium } from 'playwright-extra'
+import StealthPlugin from 'puppeteer-extra-plugin-stealth'
 import { PrismaClient } from '@prisma/client'
 import { env } from '@/lib/env'
+
+chromium.use(StealthPlugin())
 
 // Shared Prisma client — re-used across calls within the same process.
 const prisma = new PrismaClient()
@@ -20,14 +28,24 @@ const prisma = new PrismaClient()
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /**
- * A realistic Chrome user-agent string.  Keep in sync with the Chromium
- * version shipped in the installed Playwright release so the UA and browser
- * fingerprint are consistent.
+ * User-agent for the BUNDLED-Chromium fallback only. When we launch real Chrome
+ * (channel: "chrome") we deliberately do NOT override the UA — Chrome's native
+ * UA must match its actual version/fingerprint, or sites like LinkedIn detect
+ * the mismatch and kill the session.
  */
-const CHROME_USER_AGENT =
+const FALLBACK_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
   'AppleWebKit/537.36 (KHTML, like Gecko) ' +
   'Chrome/131.0.0.0 Safari/537.36'
+
+/** Locale + timezone kept consistent across launches to stabilise the fingerprint. */
+const LOCALE = 'en-US'
+const TIMEZONE = 'America/Chicago'
+
+/** Path where a per-account cookie backup is written (safety net for the profile). */
+function cookieBackupPath(sessionPath: string): string {
+  return sessionPath.replace(/\/+$/, '') + '.cookies.json'
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -46,69 +64,74 @@ export async function openAccountBrowser(sessionPath: string): Promise<BrowserCo
   // Ensure the session directory exists — Playwright will populate it.
   await fs.mkdir(sessionPath, { recursive: true })
 
-  // Real Chrome needs a minimal, clean set of flags — the sandbox-disabling
-  // flags are only for headless/root environments and trigger a scary warning
-  // banner + degrade security when passed to a normal desktop Chrome.
+  // Minimal, clean flags. The sandbox-disabling flags are only for headless/root
+  // environments and trigger a scary banner + degrade security in desktop Chrome.
   const commonArgs = [
     '--disable-blink-features=AutomationControlled',
     '--disable-infobars',
   ]
+  const baseOptions = {
+    headless: false as const,
+    viewport: { width: 1440, height: 1000 } as const,
+    acceptDownloads: true,
+    // Stable fingerprint across launches — a shifting locale/timezone reads as a
+    // new/suspicious device and prompts re-auth.
+    locale: LOCALE,
+    timezoneId: TIMEZONE,
+    ignoreDefaultArgs: ['--enable-automation'],
+    args: commonArgs,
+  }
 
-  // Try real Chrome first — it passes TikTok/Instagram bot detection far better
-  // than Playwright's bundled Chromium.
+  // Prefer real Chrome — it passes bot detection far better than bundled
+  // Chromium. Crucially, do NOT set userAgent here: real Chrome's native UA must
+  // match its true version/fingerprint (a mismatch is a top detection signal).
   let context: BrowserContext
   try {
     context = await chromium.launchPersistentContext(sessionPath, {
-      headless: false,
-      viewport: { width: 1440, height: 1000 },
-      userAgent: CHROME_USER_AGENT,
-      acceptDownloads: true,
+      ...baseOptions,
       channel: 'chrome',
-      args: commonArgs,
-      ignoreDefaultArgs: ['--enable-automation'],
     })
   } catch {
-    // Chrome not installed — fall back to bundled Chromium. Try without
-    // sandbox-disabling flags first; sites like Reddit block browsers launched
-    // with --no-sandbox before the user can complete manual login.
+    // Bundled Chromium fallback (CI / no Chrome). Here a UA override is fine
+    // because the bundled build's fingerprint is generic anyway.
     try {
       context = await chromium.launchPersistentContext(sessionPath, {
-        headless: false,
-        viewport: { width: 1440, height: 1000 },
-        userAgent: CHROME_USER_AGENT,
-        acceptDownloads: true,
-        args: commonArgs,
-        ignoreDefaultArgs: ['--enable-automation'],
+        ...baseOptions,
+        userAgent: FALLBACK_USER_AGENT,
       })
     } catch {
       context = await chromium.launchPersistentContext(sessionPath, {
-        headless: false,
-        viewport: { width: 1440, height: 1000 },
-        userAgent: CHROME_USER_AGENT,
-        acceptDownloads: true,
+        ...baseOptions,
+        userAgent: FALLBACK_USER_AGENT,
         args: [...commonArgs, '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-        ignoreDefaultArgs: ['--enable-automation'],
       })
     }
   }
 
-  // Inject a script that further obscures automation markers.
-  await context.addInitScript(() => {
-    // Delete or spoof webdriver property
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
-
-    // Spoof plugins to look like a real browser
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [1, 2, 3, 4, 5],
-    })
-
-    // Spoof languages
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-    })
-  })
+  // Continuously back up cookies so a mid-session token refresh (LinkedIn rotates
+  // li_at) is never lost if the process is killed before a clean close. Cleared
+  // automatically when the context closes.
+  const backupTimer = setInterval(() => {
+    void backupSessionCookies(context, sessionPath)
+  }, 20_000)
+  context.on('close', () => clearInterval(backupTimer))
 
   return context
+}
+
+/** Persist the context's current cookies to a per-account JSON backup. */
+async function backupSessionCookies(
+  context: BrowserContext,
+  sessionPath: string,
+): Promise<void> {
+  try {
+    const cookies = await context.cookies()
+    if (cookies.length > 0) {
+      await fs.writeFile(cookieBackupPath(sessionPath), JSON.stringify(cookies))
+    }
+  } catch {
+    // Best-effort — never let a backup failure interrupt posting.
+  }
 }
 
 /**
