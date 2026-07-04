@@ -148,6 +148,18 @@ export const CreateAccountSchema = z.object({
    * account. If omitted, the API will derive a path from SESSIONS_DIR.
    */
   sessionPath: z.string().optional(),
+
+  /**
+   * API credentials for non-browser platforms (currently Bluesky):
+   * { identifier, appPassword, service }. Stored on the account.
+   */
+  credentials: z
+    .object({
+      identifier: z.string().trim().optional(),
+      appPassword: z.string().trim().optional(),
+      service: z.string().trim().url().optional(),
+    })
+    .optional(),
 });
 
 export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;

@@ -34,6 +34,9 @@ model SocialAccount {
   apiTokenExpiresAt DateTime? // When apiAccessToken expires (UTC)
   apiScope          String?   // Space/comma-separated granted scopes
   apiOpenId         String?   // TikTok open_id for the authorized user
+  // ── API credentials for non-browser platforms (e.g. Bluesky) ────────────────
+  // JSON, e.g. { identifier: "name.bsky.social", appPassword: "xxxx-..." }.
+  credentials Json?
   user        User     @relation(fields: [userId], references: [id])
   posts       Post[]
   @@unique([userId, platform, username])

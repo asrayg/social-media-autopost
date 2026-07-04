@@ -54,11 +54,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { platform, username, sessionPath } = parseResult.data;
+    const { platform, username, sessionPath, credentials } = parseResult.data;
 
     // Derive session path from SESSIONS_DIR if none provided
     const resolvedSessionPath =
       sessionPath ?? path.join(env.SESSIONS_DIR, platform, username);
+
+    // API-credential platforms (Bluesky) don't use a browser session, so an
+    // account created with an app password is immediately usable ("active").
+    // Browser platforms start as needs_manual_login until the user logs in.
+    const hasApiCredentials = Boolean(credentials?.appPassword);
+    const initialStatus =
+      platform === "bluesky"
+        ? hasApiCredentials
+          ? "active"
+          : "needs_manual_login"
+        : "active";
 
     // Check for duplicate (same user + platform + username)
     const existing = await prisma.socialAccount.findUnique({
@@ -86,7 +97,9 @@ export async function POST(req: NextRequest) {
         platform,
         username,
         sessionPath: resolvedSessionPath,
-        status: "active",
+        status: initialStatus,
+        credentials:
+          credentials && Object.keys(credentials).length > 0 ? credentials : undefined,
       },
     });
 

@@ -78,8 +78,12 @@ function registerAdd(accounts: Command): void {
         `Platform (${SUPPORTED_PLATFORMS.join(" | ")})`
       )
       .requiredOption("--username <username>", "Account username / handle")
+      .option(
+        "--app-password <password>",
+        "Bluesky app password (from Settings → App Passwords). Connects instantly, no browser login."
+      )
   ).action(
-    wrap(async (opts: { platform: string; username: string }) => {
+    wrap(async (opts: { platform: string; username: string; appPassword?: string }) => {
       const platform = opts.platform.toLowerCase();
       const username = opts.username;
 
@@ -88,6 +92,12 @@ function registerAdd(accounts: Command): void {
           `Unsupported platform "${opts.platform}". Supported: ${SUPPORTED_PLATFORMS.join(", ")}`
         );
       }
+
+      // Bluesky stores API credentials instead of a browser session.
+      const credentials =
+        platform === "bluesky" && opts.appPassword
+          ? { identifier: username, appPassword: opts.appPassword.trim() }
+          : undefined;
 
       // Ensure the FK target exists before inserting the account.
       await ensureMvpUser();
@@ -116,7 +126,11 @@ function registerAdd(accounts: Command): void {
           platform,
           username,
           sessionPath,
-          status: "active",
+          credentials,
+          // Bluesky is usable immediately if an app password was provided;
+          // otherwise it (like browser platforms) needs connecting first.
+          status:
+            platform === "bluesky" && !credentials ? "needs_manual_login" : "active",
         },
       });
 

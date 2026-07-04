@@ -17,12 +17,24 @@ const BLUESKY_TEXT_LIMIT = 300
 export async function publishToBluesky(post: PostWithAssets): Promise<void> {
   assertPublishableMedia(post)
 
-  const service = (process.env.BLUESKY_SERVICE || 'https://bsky.social').replace(/\/+$/, '')
-  const identifier = process.env.BLUESKY_IDENTIFIER?.trim() || post.account.username
-  const password = process.env.BLUESKY_APP_PASSWORD?.trim()
+  // Per-account credentials (set in the dashboard/CLI) take precedence, then env.
+  const creds = (post.account.credentials ?? {}) as {
+    identifier?: string
+    appPassword?: string
+    service?: string
+  }
+  const service = (
+    creds.service?.trim() ||
+    process.env.BLUESKY_SERVICE ||
+    'https://bsky.social'
+  ).replace(/\/+$/, '')
+  const identifier =
+    creds.identifier?.trim() || process.env.BLUESKY_IDENTIFIER?.trim() || post.account.username
+  const password = creds.appPassword?.trim() || process.env.BLUESKY_APP_PASSWORD?.trim()
   if (!password) {
     throw new Error(
-      'Set BLUESKY_APP_PASSWORD (an app password from Bluesky → Settings → App Passwords) to post to Bluesky.',
+      'No Bluesky app password found. Add it when connecting the account (dashboard/CLI) ' +
+        'or set BLUESKY_APP_PASSWORD. Create one at Bluesky → Settings → App Passwords.',
     )
   }
 
