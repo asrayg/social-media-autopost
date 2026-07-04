@@ -26,7 +26,7 @@ scoped to the MVP placeholder user id **`cldefaultuser000`** (overridable via th
 |---|---|
 | `autopost status` | Postgres/Redis reachability + account/post counts |
 | `autopost accounts list` | Table of all social accounts |
-| `autopost accounts add --platform <p> --username <name> [--app-password <pw>]` | Create an account row (Bluesky can connect instantly with `--app-password`) |
+| `autopost accounts add --platform <p> --username <name> [--app-password <pw>] [--android-serial <serial>]` | Create an account row (Bluesky connects instantly with `--app-password`; `--android-serial` tags the emulator for TikTok carousels / Instagram Stories) |
 | `autopost accounts login <idOrUsername> [--app-password <pw>]` | Open a **visible** Chrome to sign in manually (Bluesky: save an app password, no browser) |
 | `autopost accounts check <idOrUsername>` | **Headless** check that the saved session is still valid |
 | `autopost post --account <a> [--account <b> …] --caption <c> [--media <path>] [--type <t>]` | Create/cross-post to one **or many** accounts (draft / schedule / publish now) |
@@ -198,7 +198,7 @@ user exists first, then derives the session directory path.
 autopost accounts add \
   --platform <instagram|tiktok|twitter|linkedin|reddit|youtube|bluesky|threads|pinterest|facebook> \
   --username <name> \
-  [--app-password <pw>] [--json]
+  [--app-password <pw>] [--android-serial <serial>] [--json]
 ```
 
 - `--platform` **(required)** — one of the 10 supported platforms
@@ -210,6 +210,14 @@ autopost accounts add \
   credentials and marked `active` immediately — **no browser login needed**.
   Without it, a Bluesky row is created as `needs_manual_login` until you run
   `accounts login <id> --app-password …`.
+- `--android-serial` **(emulator-only post types)** — the emulator this account
+  posts from, e.g. `emulator-5554`. Used for TikTok photo carousels and Instagram
+  Stories, which are posted by driving the native Android apps on a logged-in
+  emulator. Stored as `androidSerial` on the account's `credentials` JSON; the
+  driver then runs `adb -s <serial>`. Give each same-platform account **its own
+  emulator serial** to keep their logged-in sessions separate (one emulator per
+  account). Omit it to fall back to the `TT_ANDROID_SERIAL` env default. Full
+  setup: [EMULATOR-SETUP.md](EMULATOR-SETUP.md).
 
 Bluesky credentials on the account take precedence over the
 `BLUESKY_IDENTIFIER` / `BLUESKY_APP_PASSWORD` / `BLUESKY_SERVICE` env fallbacks.
@@ -380,8 +388,8 @@ can accept the content, the command errors.
 
 | Platform | Post types |
 |---|---|
-| `instagram` | `image`, `carousel`, `reel` |
-| `tiktok` | `video`, `carousel` |
+| `instagram` | `image`, `carousel`, `reel`, `story` *(story via Android emulator)* |
+| `tiktok` | `video`, `carousel` *(carousel native via Android emulator)* |
 | `twitter` | `text`, `image`, `video` |
 | `linkedin` | `text`, `image`, `video` |
 | `reddit` | `text`, `image`, `video` |
@@ -394,12 +402,14 @@ can accept the content, the command errors.
 Local `--media` paths are resolved to absolute and must exist, or the command
 errors. `--media-url` entries are downloaded into `UPLOAD_DIR` before use.
 
-> **TikTok carousel caveat:** TikTok's **web** uploader only accepts video — a
-> photo carousel scheduled for the TikTok *web* path will fail at publish time.
-> Photo carousels go through the official Content Posting API instead
-> (see [TIKTOK_API.md](TIKTOK_API.md)).
-> **Instagram Stories** are not supported (web has no story creation); Facebook
-> Stories (`--type story`) work.
+> **Emulator-only types:** TikTok photo carousels and Instagram Stories don't
+> exist on the web, so they're posted by driving the **native Android apps on a
+> logged-in Android emulator** (see [EMULATOR-SETUP.md](EMULATOR-SETUP.md)).
+> TikTok `carousel` uses the emulator by default; set `TIKTOK_CAROUSEL_MODE=api`
+> to use the official Content Posting API instead (see [TIKTOK_API.md](TIKTOK_API.md)).
+> Instagram `--type story` and Facebook `--type story` both work (Facebook via web
+> automation, Instagram via the emulator). The emulator must be running and logged
+> in at publish time — just like the browser worker needs to be up.
 
 **Return shape:** `post` returns `{ "created": [...], "skipped": [...] }`.
 `created` holds one post object per successfully created target; `skipped` holds
@@ -667,7 +677,24 @@ autopost post \
 You will be asked to confirm once before it publishes to the live account(s)
 (unless `--json` / non-TTY, which auto-confirms).
 
-### (d) Schedule with per-post options + run the worker
+### (d) Post an Instagram Story (Android emulator)
+
+```bash
+# Single photo or video → Instagram Story. Needs a running, logged-in emulator
+# (see EMULATOR-SETUP.md). For a specific account's emulator, that account was
+# added with `--android-serial <serial>`.
+autopost post \
+  --account my_instagram \
+  --type story \
+  --caption "behind the scenes" \
+  --media ./uploads/pic.jpg
+```
+
+The same works for a TikTok photo carousel: attach ≥2 images to a TikTok account
+(`--type carousel`, or just omit `--type` and it auto-resolves), which posts via
+the emulator by default.
+
+### (e) Schedule with per-post options + run the worker
 
 ```bash
 # Reddit target subreddit + YouTube visibility, scheduled for later.
@@ -683,7 +710,7 @@ autopost post \
 autopost worker
 ```
 
-### (e) Inspect and retry a failed post
+### (f) Inspect and retry a failed post
 
 ```bash
 autopost posts list --status failed --json
@@ -691,7 +718,7 @@ autopost posts get <id> --json          # read errorMessage + attempts
 autopost posts retry <id>               # re-enqueue (worker must be running)
 ```
 
-### (f) Check system status
+### (g) Check system status
 
 ```bash
 autopost status --json
@@ -708,9 +735,14 @@ autopost status --json
   creates one Post per account and returns `{ created, skipped }`. Accounts whose
   platform can't accept the media (e.g. a video sent to Bluesky) are skipped, not
   errored.
-- **TikTok photo carousels** go through the official Content Posting API, not the
-  web uploader (web is video-only). Facebook Stories (`--type story`) work;
-  Instagram Stories are not supported.
+- **TikTok photo carousels & Instagram Stories** are posted natively via a
+  logged-in **Android emulator** (adb/uiautomator), since the web can't do either.
+  Like the worker, the emulator must be running and logged in at publish time or
+  the post fails. TikTok carousels can fall back to the official Content Posting
+  API with `TIKTOK_CAROUSEL_MODE=api`. For several accounts on the same platform,
+  run one emulator per account and tag each with `accounts add --android-serial`.
+  Facebook Stories (`--type story`) still go through web automation. See
+  [EMULATOR-SETUP.md](EMULATOR-SETUP.md).
 - **Per-post options** (`--subreddit`, `--visibility`, `--board`) replaced the
   old env vars and are stored on `Post.options`.
 - **Do not bypass 2FA / CAPTCHA.** Authenticate browser platforms through

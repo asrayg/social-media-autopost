@@ -16,9 +16,9 @@ The `autopost` CLI manages a self-hosted multi-platform social media scheduler
 across 10 networks — Instagram, TikTok, Twitter/X, LinkedIn, Reddit, YouTube,
 Bluesky, Threads, Pinterest, and Facebook. It shares one Postgres DB, one
 Redis/BullMQ queue, and the same automation (Playwright + stealth for browser
-platforms; the Bluesky AT Protocol API; the TikTok Content Posting API for photo
-carousels) as the project's web UI. All data is scoped to the MVP user
-`cldefaultuser000`.
+platforms; the Bluesky AT Protocol API; a native **Android emulator**
+(adb/uiautomator) for TikTok photo carousels and Instagram Stories) as the
+project's web UI. All data is scoped to the MVP user `cldefaultuser000`.
 
 ## How to invoke
 
@@ -49,7 +49,7 @@ Equivalent alternatives: `npm run cli -- <command> --json`,
 |---|---|---|
 | `status` | — | `{postgres, redis, accounts, posts:{total,draft,scheduled,processing,posted,failed}}` |
 | `accounts list` | — | array of account objects |
-| `accounts add` | `--platform <p> --username <name> [--app-password <pw>]` | created account object (Bluesky: `--app-password` connects instantly) |
+| `accounts add` | `--platform <p> --username <name> [--app-password <pw>] [--android-serial <serial>]` | created account object (Bluesky: `--app-password` connects instantly; `--android-serial` = emulator for TikTok carousels / IG Stories) |
 | `accounts login` | `<idOrUsername> [--app-password <pw>]` | account object after browser closes (**browser platforms: opens a visible browser — human only**; Bluesky: saves app password, no browser) |
 | `accounts check` | `<idOrUsername>` | `{id, platform, username, loggedIn, status}` |
 | `post` | `--account <a> [--account <b>…] --caption <c> [--type <t>] [--media <path>…] [--media-url <url>…] [--subreddit <s>] [--visibility <v>] [--board <b>] [--at <ISO>] [--now] [--draft]` | **`{created[], skipped[]}`** — one post per account |
@@ -79,8 +79,8 @@ Platform → post types:
 
 | Platform | Types |
 |---|---|
-| instagram | image, carousel, reel |
-| tiktok | video, carousel *(carousel = official API; web is video-only)* |
+| instagram | image, carousel, reel, story *(story = native Android emulator)* |
+| tiktok | video, carousel *(carousel = native Android emulator; `TIKTOK_CAROUSEL_MODE=api` uses the official API)* |
 | twitter | text, image, video |
 | linkedin | text, image, video |
 | reddit | text, image, video |
@@ -97,8 +97,13 @@ Rules:
   from the media. Only set it to force a specific type.
 - **Per-post options** (stored on `Post.options`): `--subreddit` (Reddit),
   `--visibility PUBLIC|UNLISTED|PRIVATE` (YouTube), `--board` (Pinterest).
-- **Stories:** Facebook only (`--type story`). **Instagram Stories are NOT
-  supported.**
+- **Stories:** Instagram (`--type story`, via the Android emulator) and Facebook
+  (`--type story`, via web automation) — a single photo or video.
+- **Emulator-only types** (Instagram `story`, TikTok `carousel`) are posted by
+  driving the native Android apps on a logged-in **Android emulator**. It must be
+  booted and logged in at publish time — like the worker must be running.
+  Multi-account on the same platform = one emulator per account, tagged via
+  `accounts add --android-serial <serial>`. See `docs/EMULATOR-SETUP.md`.
 - `post` with neither `--now` nor `--draft` **schedules** and enqueues a job per
   post that only fires when the worker is running.
 
@@ -136,6 +141,13 @@ npx tsx src/cli/index.ts post --account my_reddit --account my_youtube \
   --subreddit travel --visibility UNLISTED --json
 ```
 
+Instagram Story (native Android emulator — needs a booted, logged-in emulator):
+```bash
+npx tsx src/cli/index.ts post --account my_instagram --type story \
+  --caption "bts" --media ./uploads/pic.jpg --json
+# TikTok carousel: attach ≥2 images to a TikTok account (--type carousel, or omit)
+```
+
 Post now (LIVE publish — only after explicit approval):
 ```bash
 npx tsx src/cli/index.ts post --account the.brik \
@@ -166,10 +178,15 @@ npx tsx src/cli/index.ts posts retry <id> --json
    `--at <time>` vs `--draft`). Repeat them back and wait for approval.
 4. **Check the `skipped` array** in the `post` result and report it — some
    accounts may have been skipped because their platform can't accept the media.
-5. **TikTok photo carousels** go through the official API, not web. **Facebook
-   Stories** (`--type story`) work; **Instagram Stories are not supported.**
+5. **TikTok carousels & Instagram Stories** post via a native **Android emulator**
+   (adb/uiautomator) — the emulator must be booted and logged in at publish time,
+   or the post fails. TikTok carousels can fall back to the official API with
+   `TIKTOK_CAROUSEL_MODE=api`. Facebook Stories (`--type story`) use web
+   automation. Multi-account on one platform → one emulator per account via
+   `accounts add --android-serial`.
 6. **Scheduled posts need the worker running** (`autopost worker`) and the
-   machine awake. Tell the user if nothing will publish otherwise.
+   machine awake — and emulator posts additionally need the emulator booted +
+   logged in. Tell the user if nothing will publish otherwise.
 7. **Do not attempt to bypass 2FA/CAPTCHA.** If `accounts check` reports
    `loggedIn: false` / `needs_manual_login`, tell the user to run
    `accounts login` (or, for Bluesky, re-save the app password). A logged-out

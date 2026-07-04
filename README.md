@@ -15,9 +15,10 @@ AutoPost lets you queue up content for **Instagram, TikTok, Twitter/X, LinkedIn,
 Reddit, YouTube, Bluesky, Threads, Pinterest, and Facebook**, schedule it, and
 let a background worker publish it while you sleep. It drives a real, persistent
 browser session per account for the browser platforms, uses **Bluesky's official
-AT Protocol API** (handle + app password, no browser), and TikTok's **official
-Content Posting API** for photo carousels. **Cross-post** one piece of content to
-many accounts at once. Everything is available from a polished web dashboard or
+AT Protocol API** (handle + app password, no browser), and drives the **native
+Android apps on a local emulator** for the things the web can't do — **TikTok
+photo carousels** and **Instagram Stories**. **Cross-post** one piece of content
+to many accounts at once. Everything is available from a polished web dashboard or
 the `autopost` CLI.
 
 > ## ⚠️ Disclaimer — read this first
@@ -39,10 +40,16 @@ the `autopost` CLI.
       YouTube, Bluesky, Threads, Pinterest, and Facebook (see the table below)
 - [x] **Cross-posting** — send one caption + media set to **many accounts at
       once**; the post type is auto-resolved per platform from the media
-- [x] **Stories** — Facebook Stories via web automation (photo or video)
+- [x] **Stories** — **Instagram Stories** (via a native Android emulator) and
+      **Facebook Stories** (via web automation) — photo or video
+- [x] **TikTok photo carousels & Instagram Stories** — posted natively by driving
+      the real Android apps on a local **Android emulator** (adb/uiautomator), the
+      only reliable way to do what the web can't (see
+      [docs/EMULATOR-SETUP.md](docs/EMULATOR-SETUP.md)); TikTok carousels can
+      optionally fall back to the official
+      [Content Posting API](docs/TIKTOK_API.md)
 - [x] **Official APIs where they exist** — **Bluesky** via the AT Protocol API
-      (handle + app password, **no browser**), **TikTok photo carousels** via the
-      official [Content Posting API](docs/TIKTOK_API.md) (OAuth 2.0)
+      (handle + app password, **no browser**)
 - [x] **Per-post options** — Reddit target subreddit, YouTube visibility
       (PUBLIC / UNLISTED / PRIVATE), and Pinterest board, set per post in the UI
       or via CLI flags (no longer env-wide)
@@ -74,8 +81,8 @@ the `autopost` CLI.
 
 | Platform | Post types | Publishing method |
 |----------|-----------|-------------------|
-| **Instagram** | image, carousel, reel | Browser automation |
-| **TikTok** | video; photo carousel | Browser (video) · official [Content Posting API](docs/TIKTOK_API.md) (carousel) |
+| **Instagram** | image, carousel, reel, **story** | Browser automation · **story** via [Android emulator](docs/EMULATOR-SETUP.md) |
+| **TikTok** | video; photo carousel | Browser (video) · **carousel** native via [Android emulator](docs/EMULATOR-SETUP.md) (or official [Content Posting API](docs/TIKTOK_API.md) fallback) |
 | **Twitter/X** | text, image, video | Browser automation |
 | **LinkedIn** | text, image, video | Browser automation |
 | **Reddit** | text, image, video | Browser automation |
@@ -85,9 +92,25 @@ the `autopost` CLI.
 | **Pinterest** | image, video (Pin) | Browser automation |
 | **Facebook** | text, image, video, **story** | Browser automation |
 
-> **Stories:** Facebook Stories work via web automation. **Instagram Stories are
-> not supported** — Instagram's web has no story-creation flow (it's mobile-app
-> only), so they can't be automated.
+> **Stories:** **Instagram Stories** are posted by driving the native Instagram
+> Android app on a local emulator (Instagram's web has no story-creation flow);
+> **Facebook Stories** work via web automation. Both accept a photo or video.
+
+### TikTok carousels & Instagram Stories (Android emulator)
+
+TikTok photo carousels and Instagram Stories don't exist on the web, so AutoPost
+posts them by driving the **real Android apps** (TikTok Lite, Instagram) on a
+local **Android emulator** via `adb`/uiautomator. This is a **one-time setup**:
+install the Android SDK, create a Play Store AVD, install the apps and log in by
+hand once — the worker then reuses that session for every future post, exactly
+like the persistent browser sessions. The emulator, `adb`, and the drivers are
+**cross-platform** (macOS, Linux, Windows); a headless Linux server just needs a
+virtual display (`xvfb-run`), same as the browser worker. For **multiple accounts
+on the same platform**, run one emulator per account and tag each account with its
+emulator serial. TikTok carousels can instead use the official
+[Content Posting API](docs/TIKTOK_API.md) by setting `TIKTOK_CAROUSEL_MODE=api`.
+
+Full walkthrough: [**docs/EMULATOR-SETUP.md**](docs/EMULATOR-SETUP.md).
 
 ---
 
@@ -111,6 +134,11 @@ shortcuts are OS-aware). A few things to know before deploying:
   — the `scripts/*.sh` helpers require WSL or Git Bash.
 - **LinkedIn and Facebook** are the most fragile sessions and re-login
   occasionally even with the stealth hardening in place.
+- **TikTok carousels / Instagram Stories** need a running, logged-in **Android
+  emulator** (`adb` auto-resolved per-OS, incl. `adb.exe` on Windows). On a
+  headless Linux server run the emulator under a virtual display too, e.g.
+  `xvfb-run emulator -avd AutoPost_Pixel7 -no-window`. See
+  [docs/EMULATOR-SETUP.md](docs/EMULATOR-SETUP.md).
 
 ---
 
@@ -251,9 +279,10 @@ fall back to `BLUESKY_IDENTIFIER` / `BLUESKY_APP_PASSWORD` / `BLUESKY_SERVICE` i
 
 AutoPost is a Next.js dashboard + `autopost` CLI writing to one PostgreSQL DB and
 one Redis instance; a BullMQ worker dequeues publish jobs and drives either
-Playwright (the browser platforms), the Bluesky AT Protocol API, or the TikTok
-Content Posting API (photo carousels). Cross-posting fans one submission out to
-one Post per selected account.
+Playwright (the browser platforms), the Bluesky AT Protocol API, or a native
+**Android emulator** (adb/uiautomator) for TikTok photo carousels and Instagram
+Stories (TikTok carousels can fall back to the official Content Posting API).
+Cross-posting fans one submission out to one Post per selected account.
 
 ```
 create post ─▶ /api/posts | /api/posts/batch ─▶ Post row(s) + BullMQ delayed job(s)
@@ -291,10 +320,12 @@ exit code, and end-to-end workflow.
 
 ## TikTok Content Posting API
 
-TikTok photo carousels are published through TikTok's **official** Content
-Posting API (OAuth 2.0) rather than browser automation. You register your own
-TikTok developer app and authorize your account; tokens are stored on the
-account record and used against `open.tiktokapis.com`. Setup and details:
+By default TikTok photo carousels are posted natively via the
+[Android emulator](docs/EMULATOR-SETUP.md). As an alternative, set
+`TIKTOK_CAROUSEL_MODE=api` to publish them through TikTok's **official** Content
+Posting API (OAuth 2.0) instead — you register your own TikTok developer app and
+authorize your account; tokens are stored on the account record and used against
+`open.tiktokapis.com`. Setup and details:
 [**docs/TIKTOK_API.md**](docs/TIKTOK_API.md).
 
 ---
@@ -318,14 +349,16 @@ social-media-autopost/
 │   ├── automation/            # browser.ts (+ stealth), selectors.ts, and one
 │   │                          # publisher per platform (instagram, tiktok,
 │   │                          # twitter, linkedin, reddit, youtube, bluesky,
-│   │                          # threads, pinterest, facebook)
+│   │                          # threads, pinterest, facebook); android.ts +
+│   │                          # tiktok-android.ts / instagram-android.ts drive
+│   │                          # the Android emulator (carousels, stories)
 │   ├── integrations/tiktok/   # official Content Posting API types
 │   ├── media/                 # processImage.ts (Sharp), processVideo.ts (FFmpeg)
 │   ├── workers/
 │   │   └── publish.worker.ts  # BullMQ worker
 │   └── cli/                   # autopost CLI (commands/, lib/)
 ├── tests/                     # Vitest (validations, time, media processing)
-├── docs/                      # ARCHITECTURE.md, CLI.md, TIKTOK_API.md
+├── docs/                      # ARCHITECTURE.md, CLI.md, TIKTOK_API.md, EMULATOR-SETUP.md
 └── assets/screenshots/        # UI screenshots used in this README
 ```
 

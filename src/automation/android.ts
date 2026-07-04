@@ -49,15 +49,25 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 // ── adb plumbing ──────────────────────────────────────────────────────────────
 
 function resolveAdb(): string {
+  // adb / the Android SDK are cross-platform; only the binary name and default
+  // SDK location differ per OS (Windows uses adb.exe + %LOCALAPPDATA%\Android\Sdk).
+  const isWin = process.platform === 'win32'
+  const bin = isWin ? 'adb.exe' : 'adb'
+  const pt = (root: string) => path.join(root, 'platform-tools', bin)
+  const sdkDefaults = isWin
+    ? [process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Android', 'Sdk')]
+    : [
+        path.join(homedir(), 'Library/Android/sdk'), // macOS
+        path.join(homedir(), 'Android/Sdk'), // Linux
+      ]
   const candidates = [
     process.env.ADB_PATH,
-    process.env.ANDROID_HOME && path.join(process.env.ANDROID_HOME, 'platform-tools', 'adb'),
-    process.env.ANDROID_SDK_ROOT && path.join(process.env.ANDROID_SDK_ROOT, 'platform-tools', 'adb'),
-    path.join(homedir(), 'Library/Android/sdk/platform-tools/adb'),
-    path.join(homedir(), 'Android/Sdk/platform-tools/adb'),
+    process.env.ANDROID_HOME && pt(process.env.ANDROID_HOME),
+    process.env.ANDROID_SDK_ROOT && pt(process.env.ANDROID_SDK_ROOT),
+    ...sdkDefaults.filter(Boolean).map((root) => pt(root as string)),
   ].filter(Boolean) as string[]
   for (const c of candidates) if (existsSync(c)) return c
-  return 'adb' // fall back to PATH
+  return bin // fall back to PATH
 }
 
 const ADB = resolveAdb()

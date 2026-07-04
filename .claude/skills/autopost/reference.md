@@ -55,12 +55,19 @@ Empty → `[]`. `status ∈ active | needs_manual_login | failed`.
 ## accounts add
 
 ```
-npx tsx src/cli/index.ts accounts add --platform <p> --username <name> [--app-password <pw>] --json
+npx tsx src/cli/index.ts accounts add --platform <p> --username <name> [--app-password <pw>] [--android-serial <serial>] --json
 ```
 Platforms: `instagram | tiktok | twitter | linkedin | reddit | youtube | bluesky
 | threads | pinterest | facebook`. Returns the created account object (same shape
 as a list entry). Errors on unsupported platform or duplicate
 `(platform, username)`. `--platform` and `--username` are required.
+
+`--android-serial <serial>` (e.g. `emulator-5554`) tags the emulator this account
+posts from for the emulator-only types (TikTok carousels, Instagram Stories);
+stored as `androidSerial` on the account's `credentials` JSON so the driver runs
+`adb -s <serial>`. Give each same-platform account its own emulator serial (one
+emulator per account); omit to use the `TT_ANDROID_SERIAL` env default. See
+`docs/EMULATOR-SETUP.md`.
 
 `--app-password` (**Bluesky only**) stores the app password and marks the account
 `active` immediately — no browser login:
@@ -141,11 +148,14 @@ inline per target, status `posted` or `failed`. `--now` + `--draft` is an error.
 `--at` is ignored with `--now`. Confirms **once** for all live targets (auto-
 confirmed in `--json`).
 
-Post types per platform: instagram `image|carousel|reel`; tiktok `video|carousel`
-(carousel = official API; web is video-only); twitter/linkedin/reddit/threads/
-facebook `text|image|video` (facebook also `story`); youtube `video|short`;
-bluesky `text|image`; pinterest `image|video`. **Facebook Stories work; Instagram
-Stories are NOT supported.** Media paths must exist (resolved to absolute).
+Post types per platform: instagram `image|carousel|reel|story`; tiktok
+`video|carousel`; twitter/linkedin/reddit/threads/facebook `text|image|video`
+(facebook also `story`); youtube `video|short`; bluesky `text|image`; pinterest
+`image|video`. **Emulator-only types:** Instagram `story` and TikTok `carousel`
+are posted by driving the native Android apps on a logged-in **Android emulator**
+(TikTok carousel falls back to the official API with `TIKTOK_CAROUSEL_MODE=api`);
+the emulator must be booted + logged in at publish time. Facebook `story` uses web
+automation. Media paths must exist (resolved to absolute).
 
 **Return shape: `{ created[], skipped[] }`** — one post per accepted account;
 `skipped` = `{account, platform, reason}` for platforms that can't take the media.

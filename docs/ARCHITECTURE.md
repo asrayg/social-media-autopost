@@ -8,8 +8,10 @@ one PostgreSQL database and one Redis instance:
 1. A **Next.js dashboard** (App Router) with REST-style API routes.
 2. An **`autopost` CLI** that talks to the same DB and queue.
 3. A **BullMQ scheduler/worker** that publishes posts at the right time.
-4. An **automation + API layer** that drives real browsers (Playwright + stealth)
-   or calls official APIs (Bluesky AT Protocol, TikTok Content Posting API).
+4. An **automation + API layer** that drives real browsers (Playwright + stealth),
+   a native **Android emulator** (adb/uiautomator, for TikTok photo carousels and
+   Instagram Stories), or calls official APIs (Bluesky AT Protocol, TikTok Content
+   Posting API).
 
 ```
                       ┌───────────────────────────────────────────┐
@@ -160,7 +162,9 @@ Under `src/automation`:
   `linkedin.ts`, `reddit.ts`, `youtube.ts`, `threads.ts`, `pinterest.ts`, and
   `facebook.ts` each drive their platform's web UI (open composer → set file
   input → caption/options → submit → confirm). `facebook.ts` also handles the
-  `story` type. `unsupported.ts` holds shared media-validation guards.
+  `story` type. `instagram.ts` and `tiktok.ts` delegate the emulator-only types
+  (Instagram `story`, TikTok `carousel`) to the Android drivers below.
+  `unsupported.ts` holds shared media-validation guards.
 - **`bluesky.ts`** — the **only non-browser** publisher: it talks to the Bluesky
   **AT Protocol XRPC HTTP API** directly with `fetch` (create session → upload
   image blobs → create post record, with link facets). No SDK, no browser. See
@@ -176,6 +180,56 @@ notification — see below); the owner reopens the browser and logs in themselve
 (including 2FA/CAPTCHA). AutoPost never bypasses authentication. **LinkedIn and
 Facebook** are the most fragile sessions and re-login most often despite the
 stealth hardening.
+
+## Android-emulator automation layer
+
+A few post types simply don't exist on the web and can't be done with browser
+automation: **TikTok photo carousels** (TikTok's web uploader is video-only) and
+**Instagram Stories** (Instagram's web has no story-creation UI). AutoPost posts
+these by driving the **native Android apps** on a local emulator via
+`adb`/uiautomator. Three files under `src/automation`:
+
+- **`android.ts`** — shared plumbing. Resolves the `adb` binary cross-platform
+  (`ANDROID_HOME` / `ANDROID_SDK_ROOT` / the per-OS default SDK location / an
+  explicit `ADB_PATH`, including `adb.exe` and `%LOCALAPPDATA%\Android\Sdk` on
+  Windows), checks device readiness (`get-state`, `sys.boot_completed`, package
+  installed), and provides `shell`/`tap`/`typeText`, a uiautomator dump + node
+  finder (`uiDump`, `findNode(s)`, `waitForNode`, matched on `resource-id` /
+  `text` / `content-desc`), cold-start dialog dismissal, and **serialized image
+  staging** (`pushImages` pushes files newest-first and waits for each to be
+  MediaStore-indexed so gallery order matches asset order). It targets a specific
+  emulator via a module-level "current serial" — safe because emulator posts run
+  one-at-a-time (a device has a single UI).
+- **`tiktok-android.ts`** (`postCarouselViaAndroid`) — drives TikTok Lite
+  (`com.tiktok.lite.go`) to reproduce the manual carousel flow: push images →
+  open the gallery picker → multi-select in order → verify the selected count →
+  editor → caption → Post.
+- **`instagram-android.ts`** (`postStoryViaAndroid`) — drives the Instagram app
+  (`com.instagram.android`) to post a single-frame story: resume the feed → clear
+  cold-start interstitials → "Add to story" → pick the pushed image → share.
+
+**Why the split between uiautomator and screen coordinates:** the picker screens
+and system dialogs expose stable, introspectable uiautomator nodes (resource-ids,
+text), so those steps are found and tapped programmatically. But the apps' photo
+**editor / post-details pages are drawn on a native/GL surface** that uiautomator
+can't see, so those few taps use **screen coordinates** (defaults target a
+1080×2400 Pixel-7 AVD; override via `TT_ANDROID_*` / `IG_ANDROID_*` env vars).
+
+**Routing.** `tiktok.ts` sends `post.type === "carousel"` to
+`postCarouselViaAndroid` unless `TIKTOK_CAROUSEL_MODE === "api"` (default is
+`android`), in which case it falls back to the official Content Posting API.
+`instagram.ts` sends `post.type === "story"` to `postStoryViaAndroid`. Videos and
+all other Instagram/TikTok types still go through the browser publishers.
+
+**Per-account emulator.** An emulator holds one logged-in session per app, so to
+run several accounts on the *same* platform you run **one emulator per account**
+and store its serial as `androidSerial` on the account's `credentials` JSON (set
+via `accounts add --android-serial <serial>` or the web Add Account form). The
+driver reads it with `accountSerial(...)` and runs `adb -s <serial>`; otherwise it
+falls back to the `TT_ANDROID_SERIAL` env default. Like the browser sessions, the
+emulator must be booted and logged in — a human does that **once** and the session
+persists in the AVD; the worker never boots the emulator or logs in. Full setup:
+[EMULATOR-SETUP.md](EMULATOR-SETUP.md).
 
 ## Cross-post fan-out
 
@@ -236,7 +290,9 @@ through the same processing pipeline.
 
 ## TikTok Content Posting API path
 
-For **TikTok photo carousels**, AutoPost uses the official
+For **TikTok photo carousels**, this is the **fallback** path used when
+`TIKTOK_CAROUSEL_MODE=api` (the default is the Android emulator, above): the
+official
 [TikTok Content Posting API](https://developers.tiktok.com/doc/content-posting-api-get-started)
 instead of browser automation. Types for the v2 endpoints (OAuth token exchange,
 direct post, photo media transfer, status query) live in
