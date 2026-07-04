@@ -60,3 +60,9 @@ scripts/li-*.ts
 scripts/stealth-check.ts
 scripts/li-check.ts
 *.cookies.json
+scripts/disc-*.ts
+scripts/probe-*.ts
+scripts/li-check.ts
+scripts/li-post.ts
+scripts/login-any.ts
+scripts/ensure-accounts.ts
