@@ -1,5 +1,6 @@
 import { BrowserContext, Page } from 'playwright'
 import { assertPublishableMedia, type PostWithAssets } from './unsupported'
+import type { PostOptions } from '@/lib/platforms'
 import {
   getActivePage,
   markAccountNeedsLogin,
@@ -26,7 +27,9 @@ export async function publishToPinterest(post: PostWithAssets): Promise<void> {
   const mediaPath = asset.processedPath ?? asset.filePath
 
   const title = (post.caption || 'Untitled').slice(0, 100)
-  const boardName = process.env.PINTEREST_BOARD?.trim()
+  // Per-post board (from the UI/CLI) takes precedence, then the env default.
+  const opts = (post.options ?? {}) as PostOptions
+  const boardName = opts.board?.trim() || process.env.PINTEREST_BOARD?.trim()
 
   let context: BrowserContext | undefined
   let page: Page | undefined

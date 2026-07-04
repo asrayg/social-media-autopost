@@ -78,6 +78,20 @@ export const CreatePostSchema = z.object({
     )
     .optional()
     .default([]),
+
+  /**
+   * Per-post, platform-specific options set from the UI/CLI:
+   *   - subreddit  (Reddit target community)
+   *   - visibility (YouTube: PUBLIC | UNLISTED | PRIVATE)
+   *   - board      (Pinterest board name)
+   */
+  options: z
+    .object({
+      subreddit: z.string().trim().max(100).optional(),
+      visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]).optional(),
+      board: z.string().trim().max(100).optional(),
+    })
+    .optional(),
 }).superRefine((value, ctx) => {
   const error = validatePlatformAssets({
     platform: value.platform,

@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -58,6 +59,10 @@ interface FormState {
   caption: string;
   scheduleMode: "now" | "later";
   scheduledAt: string; // ISO-8601 local datetime string for the input
+  // Per-platform options (Reddit subreddit, YouTube visibility, Pinterest board).
+  subreddit: string;
+  visibility: "PUBLIC" | "UNLISTED" | "PRIVATE";
+  board: string;
 }
 
 const STEP_LABELS = [
@@ -206,6 +211,9 @@ export default function NewPostPage() {
     caption: "",
     scheduleMode: "now",
     scheduledAt: localNowPlus15(),
+    subreddit: "",
+    visibility: "PRIVATE",
+    board: "",
   });
 
   // ── Load accounts ────────────────────────────────────────────────────────
@@ -305,6 +313,12 @@ export default function NewPostPage() {
           order: idx,
         }));
 
+      // Only send the option relevant to the selected platform.
+      const options: { subreddit?: string; visibility?: FormState["visibility"]; board?: string } = {};
+      if (form.platform === "reddit" && form.subreddit.trim()) options.subreddit = form.subreddit.trim();
+      if (form.platform === "youtube") options.visibility = form.visibility;
+      if (form.platform === "pinterest" && form.board.trim()) options.board = form.board.trim();
+
       const post = await api.posts.create({
         socialAccountId: form.accountId,
         platform: form.platform,
@@ -312,6 +326,7 @@ export default function NewPostPage() {
         caption: form.caption,
         scheduledAt,
         assetPaths,
+        ...(Object.keys(options).length > 0 ? { options } : {}),
       });
 
       setCreatedPostId(post.id);
@@ -372,6 +387,9 @@ export default function NewPostPage() {
                   caption: "",
                   scheduleMode: "now",
                   scheduledAt: localNowPlus15(),
+                  subreddit: "",
+                  visibility: "PRIVATE",
+                  board: "",
                 });
               }}
             >
@@ -624,6 +642,51 @@ export default function NewPostPage() {
               maxCount={CAPTION_LIMIT}
             />
           </div>
+
+          {/* Platform-specific options */}
+          {form.platform === "reddit" && (
+            <div className="space-y-2">
+              <Label htmlFor="subreddit">Subreddit</Label>
+              <Input
+                id="subreddit"
+                value={form.subreddit}
+                onChange={(e) => setForm((f) => ({ ...f, subreddit: e.target.value }))}
+                placeholder="e.g. test"
+              />
+              <p className="text-xs text-muted-foreground">
+                Community to post to, without the &ldquo;r/&rdquo;. Leave blank to post to your
+                profile (u/you).
+              </p>
+            </div>
+          )}
+          {form.platform === "youtube" && (
+            <div className="space-y-2">
+              <Label htmlFor="visibility">Visibility</Label>
+              <select
+                id="visibility"
+                value={form.visibility}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, visibility: e.target.value as FormState["visibility"] }))
+                }
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none ring-primary/40 transition focus:border-primary focus:ring-2"
+              >
+                <option value="PRIVATE">Private (only you)</option>
+                <option value="UNLISTED">Unlisted (anyone with the link)</option>
+                <option value="PUBLIC">Public</option>
+              </select>
+            </div>
+          )}
+          {form.platform === "pinterest" && (
+            <div className="space-y-2">
+              <Label htmlFor="board">Board</Label>
+              <Input
+                id="board"
+                value={form.board}
+                onChange={(e) => setForm((f) => ({ ...f, board: e.target.value }))}
+                placeholder="Board name (blank = your first board)"
+              />
+            </div>
+          )}
 
           {/* Schedule toggle */}
           <fieldset className="space-y-3">

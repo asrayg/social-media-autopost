@@ -68,6 +68,9 @@ interface PostOptions {
   at?: string;
   now?: boolean;
   draft?: boolean;
+  subreddit?: string;
+  visibility?: string;
+  board?: string;
 }
 
 // ── Inline media processing (mirrors publish.worker.ts, best-effort) ──────────
@@ -234,6 +237,9 @@ export function registerPost(program: Command): void {
       .option("--at <iso8601>", "Schedule time (ISO-8601); defaults to now")
       .option("--now", "Publish immediately, inline (runs real automation)")
       .option("--draft", "Save as a draft without scheduling")
+      .option("--subreddit <name>", "Reddit: target community (without r/); defaults to your profile")
+      .option("--visibility <level>", "YouTube: PUBLIC | UNLISTED | PRIVATE (default PRIVATE)")
+      .option("--board <name>", "Pinterest: board to pin to (default first board)")
   ).action(
     wrap(async (opts: PostOptions) => {
       const type = opts.type.toLowerCase() as PostType;
@@ -309,6 +315,12 @@ export function registerPost(program: Command): void {
 
       const status = opts.draft ? "draft" : opts.now ? "processing" : "scheduled";
 
+      // Per-post platform options from flags.
+      const postOptions: Record<string, string> = {};
+      if (opts.subreddit) postOptions.subreddit = opts.subreddit.trim();
+      if (opts.visibility) postOptions.visibility = opts.visibility.trim().toUpperCase();
+      if (opts.board) postOptions.board = opts.board.trim();
+
       const post = (await prisma.post.create({
         data: {
           userId: MVP_USER_ID,
@@ -317,6 +329,7 @@ export function registerPost(program: Command): void {
           type,
           caption: opts.caption,
           scheduledAt,
+          options: Object.keys(postOptions).length > 0 ? postOptions : undefined,
           status: opts.now ? "draft" : status, // set to draft first; publishInline flips to processing
           assets: {
             create: resolvedAssets.map((asset, i) => ({

@@ -1,5 +1,6 @@
 import { BrowserContext, Page } from 'playwright'
 import { assertPublishableMedia, type PostWithAssets } from './unsupported'
+import type { PostOptions } from '@/lib/platforms'
 import {
   getActivePage,
   markAccountNeedsLogin,
@@ -22,10 +23,13 @@ export async function publishToYouTube(post: PostWithAssets): Promise<void> {
   if (!asset) throw new Error(`YouTube post ${post.id} has no video asset`)
   const videoPath = asset.processedPath ?? asset.filePath
 
-  const visibility = (process.env.YOUTUBE_VISIBILITY || 'PRIVATE').toUpperCase() as
-    | 'PUBLIC'
-    | 'UNLISTED'
-    | 'PRIVATE'
+  // Per-post visibility (from the UI/CLI) takes precedence, then the env default.
+  const opts = (post.options ?? {}) as PostOptions
+  const visibility = (
+    opts.visibility ||
+    process.env.YOUTUBE_VISIBILITY ||
+    'PRIVATE'
+  ).toUpperCase() as 'PUBLIC' | 'UNLISTED' | 'PRIVATE'
   const title = (post.caption || 'Untitled').slice(0, 100)
 
   let context: BrowserContext | undefined

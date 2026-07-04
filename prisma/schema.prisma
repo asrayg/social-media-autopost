@@ -50,6 +50,9 @@ model Post {
   status          String   @default("draft") // draft | scheduled | processing | posted | failed
   errorMessage    String?
   bullJobId       String?
+  // Per-post, platform-specific options set from the UI/CLI, e.g.
+  // { subreddit?: string, visibility?: "PUBLIC"|"UNLISTED"|"PRIVATE", board?: string }
+  options         Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id])

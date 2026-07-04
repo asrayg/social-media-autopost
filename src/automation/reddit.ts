@@ -1,5 +1,6 @@
 import { BrowserContext, Page } from 'playwright'
 import { assertPublishableMedia, type PostWithAssets } from './unsupported'
+import type { PostOptions } from '@/lib/platforms'
 import {
   getActivePage,
   markAccountNeedsLogin,
@@ -20,8 +21,13 @@ import {
 export async function publishToReddit(post: PostWithAssets): Promise<void> {
   assertPublishableMedia(post)
 
+  // Per-post subreddit (from the UI/CLI) takes precedence; then the env default;
+  // then the account's own profile (u/<username>).
+  const opts = (post.options ?? {}) as PostOptions
   const target =
-    process.env.REDDIT_TARGET_SUBREDDIT?.trim() || `u/${post.account.username}`
+    opts.subreddit?.trim() ||
+    process.env.REDDIT_TARGET_SUBREDDIT?.trim() ||
+    `u/${post.account.username}`
   const title = (post.caption || 'Untitled').slice(0, 300)
   const hasMedia = post.assets.length > 0
 

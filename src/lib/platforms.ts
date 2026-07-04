@@ -233,6 +233,26 @@ export const PLATFORM_POST_TYPES: Record<
   },
 };
 
+/**
+ * Per-post, platform-specific options chosen in the UI/CLI (stored on Post.options).
+ * Each field applies to a specific platform:
+ *   - subreddit  → Reddit target community (without the "r/" prefix)
+ *   - visibility → YouTube upload visibility
+ *   - board      → Pinterest board name
+ */
+export interface PostOptions {
+  subreddit?: string;
+  visibility?: "PUBLIC" | "UNLISTED" | "PRIVATE";
+  board?: string;
+}
+
+/** Which platforms expose an extra per-post option, for conditional UI. */
+export const PLATFORM_OPTION_FIELD: Partial<Record<Platform, keyof PostOptions>> = {
+  reddit: "subreddit",
+  youtube: "visibility",
+  pinterest: "board",
+};
+
 export function postTypesForPlatform(platform: Platform): PostType[] {
   return Object.keys(PLATFORM_POST_TYPES[platform]) as PostType[];
 }
