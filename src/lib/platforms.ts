@@ -13,7 +13,7 @@ export const PLATFORMS = [
 
 export type Platform = (typeof PLATFORMS)[number];
 
-export const POST_TYPES = ["image", "carousel", "reel", "video", "text", "short"] as const;
+export const POST_TYPES = ["image", "carousel", "reel", "video", "text", "short", "story"] as const;
 
 export type PostType = (typeof POST_TYPES)[number];
 
@@ -51,6 +51,9 @@ export const PLATFORM_POST_TYPES: Record<
       maxAssets: 1,
       allowedAssetTypes: ["video"],
     },
+    // NOTE: Instagram Stories are mobile-app only — the web has no story creation
+    // (the Create menu offers no Story option), so they can't be posted via
+    // browser automation. Facebook Stories work; Instagram Stories do not.
   },
   tiktok: {
     video: {
@@ -229,6 +232,13 @@ export const PLATFORM_POST_TYPES: Record<
       minAssets: 1,
       maxAssets: 1,
       allowedAssetTypes: ["video"],
+    },
+    story: {
+      label: "Story",
+      description: "24-hour story (photo or video)",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["image", "video"],
     },
   },
 };

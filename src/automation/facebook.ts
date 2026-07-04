@@ -13,6 +13,11 @@ import {
 export async function publishToFacebook(post: PostWithAssets): Promise<void> {
   assertPublishableMedia(post)
 
+  if (post.type === 'story') {
+    await postFacebookStory(post)
+    return
+  }
+
   let context: BrowserContext | undefined
   let page: Page | undefined
 
@@ -84,6 +89,61 @@ export async function publishToFacebook(post: PostWithAssets): Promise<void> {
         throw new Error('Facebook post did not confirm — the Post button is still visible')
       }
     })
+  } catch (err) {
+    if (page) {
+      const step = err instanceof Error ? err.message.slice(0, 40) : 'unknown'
+      await takeFailureScreenshot(page, post.id, step).catch(() => {})
+    }
+    throw err
+  } finally {
+    await context?.close().catch(() => {})
+  }
+}
+
+/**
+ * Post a Facebook Story (24h, single photo or video) via the story creator.
+ * The caption isn't a first-class field for photo/video stories, so it's ignored.
+ */
+async function postFacebookStory(post: PostWithAssets): Promise<void> {
+  const asset = [...post.assets].sort((a, b) => a.order - b.order)[0]
+  if (!asset) throw new Error('Facebook story requires a photo or video')
+  const mediaPath = asset.processedPath ?? asset.filePath
+
+  let context: BrowserContext | undefined
+  let page: Page | undefined
+  try {
+    context = await openAccountBrowser(post.account.sessionPath)
+    page = await getActivePage(context)
+
+    await page.goto('https://www.facebook.com/stories/create', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    })
+    await page.waitForTimeout(4_000)
+    await ensureFacebookLoggedIn(page, post.account.id)
+
+    // The story creator has a hidden file input accepting image/* and video/*.
+    const fileInput = page.locator('input[type="file"]').first()
+    await fileInput.waitFor({ state: 'attached', timeout: 20_000 })
+    await fileInput.setInputFiles(mediaPath)
+
+    // Wait for the editor/preview to render, then share.
+    await page.waitForTimeout(6_000)
+    const shareButton = page
+      .getByRole('button', { name: /share to story|add to story|share now|^share$|^post$/i })
+      .or(page.locator('div[aria-label*="Share to story" i][role="button"], div[aria-label="Share Now"][role="button"]'))
+      .first()
+    await shareButton.waitFor({ state: 'visible', timeout: 30_000 })
+    await shareButton.click({ timeout: 15_000 })
+
+    // Success: Facebook navigates away from the create page (to /stories/…).
+    await page
+      .waitForURL((url) => !url.toString().includes('/stories/create'), { timeout: 30_000 })
+      .catch(async () => {
+        if (page!.url().includes('/stories/create')) {
+          throw new Error('Facebook story did not confirm — still on the create page')
+        }
+      })
   } catch (err) {
     if (page) {
       const step = err instanceof Error ? err.message.slice(0, 40) : 'unknown'

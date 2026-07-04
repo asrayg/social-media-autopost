@@ -26,6 +26,7 @@ import {
   ImageIcon,
   Film,
   LayoutGrid,
+  CircleDashed,
   Info,
 } from "lucide-react";
 import { api, SocialAccount } from "@/lib/api";
@@ -80,6 +81,7 @@ function postTypeIcon(postType: PostType): React.ReactNode {
   if (postType === "image") return <ImageIcon className="w-4 h-4" />;
   if (postType === "carousel") return <LayoutGrid className="w-4 h-4" />;
   if (postType === "text") return <FileText className="w-4 h-4" />;
+  if (postType === "story") return <CircleDashed className="w-4 h-4" />;
   return <Film className="w-4 h-4" />;
 }
 
