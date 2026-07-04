@@ -42,9 +42,24 @@ export async function publishToTwitter(post: PostWithAssets): Promise<void> {
       await page.waitForTimeout(4_000)
     }
 
-    const postButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').last()
-    await postButton.waitFor({ state: 'visible', timeout: 20_000 })
-    await postButton.click()
+    // The compose modal's Post button is [data-testid="tweetButton"]. Target the
+    // enabled one specifically (an inline composer behind the modal has a
+    // disabled tweetButtonInline that .last() would wrongly grab). Fall back to
+    // the ⌘/Ctrl+Enter keyboard shortcut, which X honors in the composer.
+    const activePage = page
+    const postShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
+    const postButton = activePage
+      .locator('[data-testid="tweetButton"]:not([aria-disabled="true"]):not([disabled])')
+      .first()
+    if (await postButton.count()) {
+      await postButton.click({ timeout: 10_000 }).catch(async () => {
+        await composer.click()
+        await activePage.keyboard.press(postShortcut)
+      })
+    } else {
+      await composer.click()
+      await activePage.keyboard.press(postShortcut)
+    }
 
     const composePage = page
     await Promise.race([
