@@ -55,20 +55,29 @@ Empty → `[]`. `status ∈ active | needs_manual_login | failed`.
 ## accounts add
 
 ```
-npx tsx src/cli/index.ts accounts add --platform instagram --username the.brik --json
+npx tsx src/cli/index.ts accounts add --platform <p> --username <name> [--app-password <pw>] --json
 ```
-Returns the created account object (same shape as a list entry, `status:
-"active"`). Errors on unsupported platform or duplicate `(platform, username)`.
-Both flags are required.
+Platforms: `instagram | tiktok | twitter | linkedin | reddit | youtube | bluesky
+| threads | pinterest | facebook`. Returns the created account object (same shape
+as a list entry). Errors on unsupported platform or duplicate
+`(platform, username)`. `--platform` and `--username` are required.
+
+`--app-password` (**Bluesky only**) stores the app password and marks the account
+`active` immediately — no browser login:
+```
+npx tsx src/cli/index.ts accounts add --platform bluesky \
+  --username you.bsky.social --app-password xxxx-xxxx-xxxx-xxxx --json
+```
+A Bluesky account added without `--app-password` starts as `needs_manual_login`.
 
 ---
 
-## accounts login  (HUMAN ONLY — opens a visible browser, blocks until closed)
+## accounts login  (browser platforms: HUMAN ONLY — opens a visible browser, blocks until closed)
 
 ```
-npx tsx src/cli/index.ts accounts login <idOrUsername> --json
+npx tsx src/cli/index.ts accounts login <idOrUsername> [--app-password <pw>] --json
 ```
-Final stdout after the user closes the window:
+Browser platforms — final stdout after the user closes the window:
 ```json
 {
   "id": "cmr1i5axd000d58xss4iovmam",
@@ -77,6 +86,10 @@ Final stdout after the user closes the window:
   "status": "active",
   "message": "Browser closed; session saved."
 }
+```
+**Bluesky** — no browser; pass `--app-password` to save/update it:
+```json
+{ "id": "…", "platform": "bluesky", "username": "you.bsky.social", "status": "active" }
 ```
 
 ---
@@ -96,62 +109,85 @@ npx tsx src/cli/index.ts accounts check <idOrUsername> --json
 }
 ```
 `loggedIn: false` → `status: "needs_manual_login"`; tell the user to re-run
-`accounts login`.
+`accounts login`. For Bluesky, `check` validates the stored app password via an
+API login (no browser).
 
 ---
 
-## post
+## post  (cross-post: one OR many accounts)
 
 ```
 npx tsx src/cli/index.ts post \
-  --account <idOrUsername> \
-  --type <image|carousel|reel|video> \
+  --account <idOrUsername> [--account <b> …] \
+  [--type <image|carousel|reel|video|text|short|story>] \
   --caption <text> \
-  --media <path> [--media <path> ...] \
+  [--media <path> …] [--media-url <url> …] \
+  [--subreddit <name>] [--visibility <PUBLIC|UNLISTED|PRIVATE>] [--board <name>] \
   [--at <ISO8601>] [--now] [--draft] --json
 ```
 
+- **`--account` is repeatable** (or comma-separated) → cross-post. One `Post` per
+  account.
+- **`--type` is optional** — omit it and each platform auto-resolves the best type
+  from the media. Set it to force one type across all targets.
+- **Per-post options** (stored on `Post.options`): `--subreddit` (Reddit),
+  `--visibility` (YouTube, default PRIVATE), `--board` (Pinterest).
+- **`--media-url`** downloads a public URL / Google Drive link into `UPLOAD_DIR`;
+  ordered after all `--media`.
+
 Mode: `--draft` → status `draft` (nothing enqueued); default → status
-`scheduled` + BullMQ job (needs worker); `--now` → runs real automation inline,
-status `posted` or `failed`. `--now` + `--draft` is an error. `--at` is ignored
-with `--now`.
+`scheduled` + BullMQ job per post (needs worker); `--now` → runs real automation
+inline per target, status `posted` or `failed`. `--now` + `--draft` is an error.
+`--at` is ignored with `--now`. Confirms **once** for all live targets (auto-
+confirmed in `--json`).
 
-Validation: instagram → `image|carousel|reel`; tiktok → `video|carousel`.
-Multiple `--media` only for `carousel`. Media paths must exist (resolved to
-absolute). **TikTok photo carousel is accepted but fails at publish** — web is
-video-only.
+Post types per platform: instagram `image|carousel|reel`; tiktok `video|carousel`
+(carousel = official API; web is video-only); twitter/linkedin/reddit/threads/
+facebook `text|image|video` (facebook also `story`); youtube `video|short`;
+bluesky `text|image`; pinterest `image|video`. **Facebook Stories work; Instagram
+Stories are NOT supported.** Media paths must exist (resolved to absolute).
 
-Scheduled result:
+**Return shape: `{ created[], skipped[] }`** — one post per accepted account;
+`skipped` = `{account, platform, reason}` for platforms that can't take the media.
+
 ```json
 {
-  "id": "cmr1mwtum0001k2jp9oeckbep",
-  "userId": "cldefaultuser000",
-  "socialAccountId": "cmr1i5axd000d58xss4iovmam",
-  "platform": "instagram",
-  "type": "image",
-  "caption": "hello world #test",
-  "scheduledAt": "2026-07-01T18:00:00.000Z",
-  "status": "scheduled",
-  "errorMessage": null,
-  "bullJobId": "cmr1mwtum0001k2jp9oeckbep",
-  "createdAt": "2026-07-01T05:28:02.591Z",
-  "updatedAt": "2026-07-01T05:28:02.591Z",
-  "assets": [
+  "created": [
     {
-      "id": "cmr1mwtum0002k2jp9zo6pfuc",
-      "postId": "cmr1mwtum0001k2jp9oeckbep",
-      "filePath": "/Users/you/social-media-autopost/uploads/test-image.jpg",
-      "processedPath": null,
-      "type": "image", "order": 0,
-      "mimeType": null, "sizeBytes": null,
-      "width": null, "height": null, "durationSecs": null
+      "id": "cmr1mwtum0001k2jp9oeckbep",
+      "userId": "cldefaultuser000",
+      "socialAccountId": "cmr1i5axd000d58xss4iovmam",
+      "platform": "instagram",
+      "type": "image",
+      "caption": "hello world #test",
+      "scheduledAt": "2026-07-01T18:00:00.000Z",
+      "status": "scheduled",
+      "errorMessage": null,
+      "bullJobId": "cmr1mwtum0001k2jp9oeckbep",
+      "options": null,
+      "createdAt": "2026-07-01T05:28:02.591Z",
+      "updatedAt": "2026-07-01T05:28:02.591Z",
+      "assets": [
+        {
+          "id": "cmr1mwtum0002k2jp9zo6pfuc",
+          "postId": "cmr1mwtum0001k2jp9oeckbep",
+          "filePath": "/Users/you/social-media-autopost/uploads/test-image.jpg",
+          "processedPath": null,
+          "type": "image", "order": 0,
+          "mimeType": null, "sizeBytes": null,
+          "width": null, "height": null, "durationSecs": null
+        }
+      ],
+      "account": { "id": "cmr1i5axd000d58xss4iovmam", "platform": "instagram", "username": "the.brik", "status": "active" }
     }
   ],
-  "account": { "id": "cmr1i5axd000d58xss4iovmam", "platform": "instagram", "username": "the.brik", "status": "active" }
+  "skipped": []
 }
 ```
-`--draft` → `status:"draft"`, `scheduledAt:null`, `bullJobId:null`. `--now`
-success → `status:"posted"`; failure exits 1 while DB records `failed`.
+Each `created` entry with `--draft` → `status:"draft"`, `scheduledAt:null`,
+`bullJobId:null`; a `--now` success → `status:"posted"`, a `--now` failure →
+`{id, platform, status:"failed", error}`. Exit `1` only on validation errors,
+missing media, user abort, or when **no** account can accept the content.
 
 ---
 
