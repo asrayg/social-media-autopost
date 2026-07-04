@@ -155,12 +155,44 @@ function registerLogin(accounts: Command): void {
     accounts
       .command("login")
       .description(
-        "Open a visible Chrome window to the platform login page for manual sign-in"
+        "Open a visible Chrome window to sign in (or, for Bluesky, save an app password)"
       )
       .argument("<idOrUsername>", "Account id or username")
+      .option("--app-password <password>", "Bluesky only: save/update the app password (no browser)")
   ).action(
-    wrap(async (idOrUsername: string) => {
+    wrap(async (idOrUsername: string, opts: { appPassword?: string }) => {
       const account = await resolveAccount(idOrUsername);
+
+      // Bluesky uses the API (handle + app password) — no browser session.
+      if (account.platform === "bluesky") {
+        const creds = (account.credentials ?? {}) as {
+          identifier?: string;
+          appPassword?: string;
+        };
+        const appPassword = opts.appPassword?.trim() || creds.appPassword;
+        if (!appPassword) {
+          throw new Error(
+            "Bluesky uses an app password. Provide one: " +
+              "accounts login " + idOrUsername + " --app-password xxxx-xxxx-xxxx-xxxx " +
+              "(create it at Bluesky → Settings → App Passwords)."
+          );
+        }
+        const updated = await prisma.socialAccount.update({
+          where: { id: account.id },
+          data: {
+            credentials: {
+              identifier: creds.identifier || account.username,
+              appPassword,
+            },
+            status: "active",
+          },
+        });
+        printResult(
+          { id: updated.id, platform: "bluesky", username: updated.username, status: "active" },
+          () => console.log(chalk.green("✔ Bluesky app password saved; account active.")),
+        );
+        return;
+      }
 
       const loginUrl = PLATFORM_LOGIN_URLS[account.platform];
       if (!loginUrl) {
@@ -249,6 +281,35 @@ function registerCheck(accounts: Command): void {
   ).action(
     wrap(async (idOrUsername: string) => {
       const account = await resolveAccount(idOrUsername);
+
+      // Bluesky: verify the stored app password via an API login (no browser).
+      if (account.platform === "bluesky") {
+        const creds = (account.credentials ?? {}) as {
+          identifier?: string;
+          appPassword?: string;
+        };
+        const identifier = creds.identifier || process.env.BLUESKY_IDENTIFIER || account.username;
+        const appPassword = creds.appPassword || process.env.BLUESKY_APP_PASSWORD;
+        let ok = false;
+        if (appPassword) {
+          const service = (process.env.BLUESKY_SERVICE || "https://bsky.social").replace(/\/+$/, "");
+          const res = await fetch(`${service}/xrpc/com.atproto.server.createSession`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier, password: appPassword }),
+          }).catch(() => null);
+          ok = Boolean(res?.ok);
+        }
+        await prisma.socialAccount.update({
+          where: { id: account.id },
+          data: { status: ok ? "active" : "needs_manual_login" },
+        });
+        printResult(
+          { id: account.id, platform: "bluesky", username: account.username, loggedIn: ok, status: ok ? "active" : "needs_manual_login" },
+          () => console.log(ok ? chalk.green("✔ Bluesky credentials valid.") : chalk.red("✖ Bluesky credentials invalid or missing.")),
+        );
+        return;
+      }
 
       const checkUrl = PLATFORM_CHECK_URLS[account.platform];
       if (!checkUrl) {
