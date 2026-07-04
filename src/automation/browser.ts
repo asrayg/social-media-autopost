@@ -19,6 +19,7 @@ import { chromium } from 'playwright-extra'
 import StealthPlugin from 'puppeteer-extra-plugin-stealth'
 import { PrismaClient } from '@prisma/client'
 import { env } from '@/lib/env'
+import { notifyAccountLoggedOut } from '@/lib/notify'
 
 chromium.use(StealthPlugin())
 
@@ -194,10 +195,18 @@ export async function clickByPossibleTexts(
  */
 export async function markAccountNeedsLogin(accountId: string): Promise<void> {
   try {
+    const account = await prisma.socialAccount.findUnique({ where: { id: accountId } })
+    if (!account) return
+
+    // Only act (and notify) on the transition INTO needs_manual_login, so retries
+    // of the same failing job don't spam the notification channel.
+    if (account.status === 'needs_manual_login') return
+
     await prisma.socialAccount.update({
       where: { id: accountId },
       data: { status: 'needs_manual_login' },
     })
+    await notifyAccountLoggedOut(account)
   } catch (err) {
     // Log but do not re-throw — this is a best-effort bookkeeping update and
     // should not mask the original automation error.
