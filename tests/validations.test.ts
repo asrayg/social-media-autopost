@@ -12,9 +12,25 @@ import {
 describe("CreatePostSchema", () => {
   const base = {
     socialAccountId: "acc_123",
-    platform: "instagram",
-    type: "image",
+    platform: "twitter",
+    type: "text",
     caption: "Hello world",
+  };
+
+  const imageAsset = {
+    filePath: "/tmp/a.jpg",
+    filename: "a.jpg",
+    size: 1000,
+    mimeType: "image/jpeg",
+    type: "image",
+  };
+
+  const videoAsset = {
+    filePath: "/tmp/a.mp4",
+    filename: "a.mp4",
+    size: 1000,
+    mimeType: "video/mp4",
+    type: "video",
   };
 
   it("accepts a minimal valid post and applies default assetPaths", () => {
@@ -40,15 +56,9 @@ describe("CreatePostSchema", () => {
   it("parses assetPaths and applies default order", () => {
     const parsed = CreatePostSchema.parse({
       ...base,
-      assetPaths: [
-        {
-          filePath: "/tmp/a.jpg",
-          filename: "a.jpg",
-          size: 1000,
-          mimeType: "image/jpeg",
-          type: "image",
-        },
-      ],
+      platform: "instagram",
+      type: "image",
+      assetPaths: [imageAsset],
     });
     expect(parsed.assetPaths[0].order).toBe(0);
   });
@@ -86,6 +96,8 @@ describe("CreatePostSchema", () => {
   it("rejects assetPaths with a non-positive size", () => {
     const r = CreatePostSchema.safeParse({
       ...base,
+      platform: "instagram",
+      type: "image",
       assetPaths: [
         {
           filePath: "/tmp/a.jpg",
@@ -111,6 +123,118 @@ describe("CreatePostSchema", () => {
           type: "audio",
         },
       ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts linkedin image posts with multiple image assets", () => {
+    const parsed = CreatePostSchema.parse({
+      ...base,
+      platform: "linkedin",
+      type: "image",
+      assetPaths: [
+        { ...imageAsset, filePath: "/tmp/a.jpg", order: 1 },
+        { ...imageAsset, filePath: "/tmp/b.jpg", filename: "b.jpg", order: 0 },
+      ],
+    });
+    expect(parsed.assetPaths).toHaveLength(2);
+    expect(parsed.assetPaths[0].order).toBe(1);
+  });
+
+  it("rejects linkedin image posts with video assets", () => {
+    const r = CreatePostSchema.safeParse({
+      ...base,
+      platform: "linkedin",
+      type: "image",
+      assetPaths: [videoAsset],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts reddit image posts with multiple image assets", () => {
+    const parsed = CreatePostSchema.parse({
+      ...base,
+      platform: "reddit",
+      type: "image",
+      assetPaths: [imageAsset, { ...imageAsset, filePath: "/tmp/b.jpg", filename: "b.jpg" }],
+    });
+    expect(parsed.assetPaths).toHaveLength(2);
+  });
+
+  it("rejects reddit image posts without media", () => {
+    const r = CreatePostSchema.safeParse({
+      ...base,
+      platform: "reddit",
+      type: "image",
+      assetPaths: [],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts twitter image posts with four image assets", () => {
+    const parsed = CreatePostSchema.parse({
+      ...base,
+      platform: "twitter",
+      type: "image",
+      assetPaths: [0, 1, 2, 3].map((i) => ({
+        ...imageAsset,
+        filePath: `/tmp/${i}.jpg`,
+        filename: `${i}.jpg`,
+      })),
+    });
+    expect(parsed.assetPaths).toHaveLength(4);
+  });
+
+  it("rejects twitter image posts with more than four image assets", () => {
+    const r = CreatePostSchema.safeParse({
+      ...base,
+      platform: "twitter",
+      type: "image",
+      assetPaths: [0, 1, 2, 3, 4].map((i) => ({
+        ...imageAsset,
+        filePath: `/tmp/${i}.jpg`,
+        filename: `${i}.jpg`,
+      })),
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("accepts youtube video posts with one video asset", () => {
+    const parsed = CreatePostSchema.parse({
+      ...base,
+      platform: "youtube",
+      type: "video",
+      assetPaths: [videoAsset],
+    });
+    expect(parsed.assetPaths[0].type).toBe("video");
+  });
+
+  it("accepts youtube shorts posts with one video asset", () => {
+    const parsed = CreatePostSchema.parse({
+      ...base,
+      platform: "youtube",
+      type: "short",
+      assetPaths: [videoAsset],
+    });
+    expect(parsed.type).toBe("short");
+  });
+
+  it("rejects youtube video posts with image assets", () => {
+    const r = CreatePostSchema.safeParse({
+      ...base,
+      platform: "youtube",
+      type: "video",
+      assetPaths: [imageAsset],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects youtube video posts without exactly one video asset", () => {
+    const r = CreatePostSchema.safeParse({
+      ...base,
+      platform: "youtube",
+      type: "video",
+      assetPaths: [videoAsset, { ...videoAsset, filePath: "/tmp/b.mp4", filename: "b.mp4" }],
     });
     expect(r.success).toBe(false);
   });
@@ -230,10 +354,15 @@ describe("constants", () => {
   it("exposes the expected platforms", () => {
     expect(PLATFORMS).toContain("instagram");
     expect(PLATFORMS).toContain("tiktok");
+    expect(PLATFORMS).toContain("linkedin");
+    expect(PLATFORMS).toContain("reddit");
+    expect(PLATFORMS).toContain("twitter");
+    expect(PLATFORMS).toContain("youtube");
   });
 
   it("exposes the expected post types", () => {
     expect(POST_TYPES).toContain("reel");
     expect(POST_TYPES).toContain("carousel");
+    expect(POST_TYPES).toContain("short");
   });
 });

@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { socialAccountId, platform, type, caption, scheduledAt, assetPaths } =
+    const { socialAccountId, platform, type, caption, scheduledAt, assetPaths, options } =
       parseResult.data;
 
     // Verify the social account exists (and belongs to MVP user in production scope)
@@ -137,6 +137,7 @@ export async function POST(req: NextRequest) {
         caption,
         scheduledAt: scheduledAtDate,
         status,
+        options: options && Object.keys(options).length > 0 ? options : undefined,
         assets: {
           create: assetPaths.map((a) => ({
             filePath: a.filePath,

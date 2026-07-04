@@ -61,18 +61,31 @@ export async function POST(_req: NextRequest, context: RouteContext) {
         viewport: { width: 1280, height: 900 },
       });
     } catch {
-      // Chrome not found — fall back to bundled Chromium (needs sandbox flags)
-      browser = await chromium.launchPersistentContext(account.sessionPath, {
-        headless: false,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-blink-features=AutomationControlled",
-          "--window-size=1280,900",
-        ],
-        ignoreDefaultArgs: ["--enable-automation"],
-        viewport: { width: 1280, height: 900 },
-      });
+      // Chrome not found — fall back to bundled Chromium. Avoid --no-sandbox
+      // for visible manual login windows because Reddit blocks it outright.
+      try {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: false,
+          args: [
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1280,900",
+          ],
+          ignoreDefaultArgs: ["--enable-automation"],
+          viewport: { width: 1280, height: 900 },
+        });
+      } catch {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: false,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--window-size=1280,900",
+          ],
+          ignoreDefaultArgs: ["--enable-automation"],
+          viewport: { width: 1280, height: 900 },
+        });
+      }
     }
 
     // Navigate the first (default) page to the login URL

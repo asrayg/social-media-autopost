@@ -9,8 +9,9 @@ The CLI shares the **exact same backend** as the Next.js web UI:
 
 - **PostgreSQL** (via Prisma) — accounts, posts, assets, publish attempts.
 - **Redis + BullMQ** — the `publish-post` job queue.
-- **Playwright automation** — the same Instagram/TikTok publishing code the
-  worker uses.
+- **Playwright automation + official APIs** — the same publishing code the worker
+  uses across all 10 platforms (Instagram, TikTok, Twitter/X, LinkedIn, Reddit,
+  YouTube, Bluesky, Threads, Pinterest, Facebook).
 - **Filesystem** — `uploads/`, `processed/`, `sessions/`, `logs/`.
 
 Anything you do with the CLI is visible in the web UI and vice versa. Both are
@@ -25,10 +26,10 @@ scoped to the MVP placeholder user id **`cldefaultuser000`** (overridable via th
 |---|---|
 | `autopost status` | Postgres/Redis reachability + account/post counts |
 | `autopost accounts list` | Table of all social accounts |
-| `autopost accounts add --platform <p> --username <name>` | Create an account row |
-| `autopost accounts login <idOrUsername>` | Open a **visible** Chrome to sign in manually |
+| `autopost accounts add --platform <p> --username <name> [--app-password <pw>]` | Create an account row (Bluesky can connect instantly with `--app-password`) |
+| `autopost accounts login <idOrUsername> [--app-password <pw>]` | Open a **visible** Chrome to sign in manually (Bluesky: save an app password, no browser) |
 | `autopost accounts check <idOrUsername>` | **Headless** check that the saved session is still valid |
-| `autopost post --account <a> --type <t> --caption <c> --media <path>` | Create a post (draft / schedule / publish now) |
+| `autopost post --account <a> [--account <b> …] --caption <c> [--media <path>] [--type <t>]` | Create/cross-post to one **or many** accounts (draft / schedule / publish now) |
 | `autopost posts list [--status] [--platform] [--limit]` | Table of posts |
 | `autopost posts get <id>` | Full detail incl. assets + publish attempts |
 | `autopost posts retry <id>` | Re-enqueue a failed/scheduled post |
@@ -190,17 +191,28 @@ $ autopost accounts list --json
 
 ### `accounts add`
 
-Creates a new `SocialAccount` row (does **not** log in). Ensures the MVP user
-exists first, then derives the session directory path.
+Creates a new `SocialAccount` row (does **not** open a browser). Ensures the MVP
+user exists first, then derives the session directory path.
 
 ```
-autopost accounts add --platform <instagram|tiktok> --username <name> [--json]
+autopost accounts add \
+  --platform <instagram|tiktok|twitter|linkedin|reddit|youtube|bluesky|threads|pinterest|facebook> \
+  --username <name> \
+  [--app-password <pw>] [--json]
 ```
 
-- `--platform` **(required)** — `instagram` or `tiktok` (case-insensitive,
-  lower-cased). Any other value errors.
+- `--platform` **(required)** — one of the 10 supported platforms
+  (case-insensitive, lower-cased). Any other value errors.
 - `--username` **(required)** — the handle. Combined with the platform it must be
   unique per user; a duplicate errors.
+- `--app-password` **(Bluesky only)** — a Bluesky **App Password** (Bluesky →
+  Settings → App Passwords). If supplied, the Bluesky account is stored with its
+  credentials and marked `active` immediately — **no browser login needed**.
+  Without it, a Bluesky row is created as `needs_manual_login` until you run
+  `accounts login <id> --app-password …`.
+
+Bluesky credentials on the account take precedence over the
+`BLUESKY_IDENTIFIER` / `BLUESKY_APP_PASSWORD` / `BLUESKY_SERVICE` env fallbacks.
 
 JSON example:
 
@@ -220,7 +232,8 @@ $ autopost accounts add --platform instagram --username the.brik --json
 }
 ```
 
-Next step is always `autopost accounts login <id>`.
+Next step for browser platforms is always `autopost accounts login <id>`. For
+Bluesky added with `--app-password`, the account is already `active`.
 
 **Exit codes:** `0` on success; `1` on unsupported platform, duplicate account,
 or DB error.
@@ -229,20 +242,27 @@ or DB error.
 
 ### `accounts login`
 
-Opens a **visible** real-Chrome persistent-context window at the platform login
-page for **manual** sign-in. The account is marked `needs_manual_login` while the
-window is open; when you close the window the session is saved and the account is
-marked `active`. The command **blocks** until you close the browser.
+For **browser platforms**, opens a **visible** real-Chrome persistent-context
+window at the platform login page for **manual** sign-in. The account is marked
+`needs_manual_login` while the window is open; when you close the window the
+session is saved and the account is marked `active`. The command **blocks** until
+you close the browser.
+
+For **Bluesky**, this command **does not open a browser** — pass
+`--app-password` to save/update the account's app password and mark it `active`.
 
 ```
-autopost accounts login <idOrUsername> [--json]
+autopost accounts login <idOrUsername> [--app-password <pw>] [--json]
 ```
 
 - `<idOrUsername>` — resolve by account id, else by username (scoped to the MVP
   user).
+- `--app-password` **(Bluesky only)** — save/update the app password without a
+  browser. Required for Bluesky if no credentials are stored yet.
 
-Do all 2FA/verification here. This is the only supported way to authenticate —
-sessions persist under `SESSIONS_DIR` so you log in once per account.
+Do all 2FA/verification in the browser window. For browser platforms this is the
+only supported way to authenticate — sessions persist under `SESSIONS_DIR` so you
+log in once per account.
 
 Final JSON (printed after you close the browser):
 
@@ -256,8 +276,9 @@ Final JSON (printed after you close the browser):
 }
 ```
 
-> **Agents:** do not run this without the user present — it opens a real browser
-> window and expects a human to sign in.
+> **Agents:** for browser platforms, do not run this without the user present —
+> it opens a real browser window and expects a human to sign in. Bluesky
+> (`--app-password`) is safe to run non-interactively.
 
 **Exit codes:** `0` after a clean close; `1` if the account can't be resolved or
 the platform is unsupported.
@@ -299,104 +320,143 @@ or browser error.
 
 ### `post`
 
-Creates a `Post` plus its `PostAsset`s and then, depending on flags, saves a
-draft, schedules it for the worker, or publishes it inline immediately.
+Creates one `Post` (plus its `PostAsset`s) **per selected account** and then,
+depending on flags, saves them as drafts, schedules them for the worker, or
+publishes them inline immediately. This is the **cross-posting** command: pass
+`--account` multiple times to fan one submission out to many platforms at once.
 
 ```
 autopost post \
-  --account <idOrUsername> \
-  --type <image|carousel|reel|video> \
+  --account <idOrUsername> [--account <b> …] \
+  [--type <image|carousel|reel|video|text|short|story>] \
   --caption <text> \
-  --media <path> [--media <path> ...] \
+  [--media <path> …] [--media-url <url> …] \
+  [--subreddit <name>] [--visibility <PUBLIC|UNLISTED|PRIVATE>] [--board <name>] \
   [--at <ISO8601>] [--now] [--draft] [--json]
 ```
 
 | Flag | Required | Meaning |
 |---|---|---|
-| `--account` | yes | Target account, by id or username |
-| `--type` | yes | `image`, `carousel`, `reel`, or `video` |
+| `--account` | yes (≥1) | Target account by id or username. **Repeat** — or comma-separate — to cross-post to many |
+| `--type` | no | `image`, `carousel`, `reel`, `video`, `text`, `short`, or `story`. **Omit to auto-pick** the best type per platform from the media |
 | `--caption` | yes | Caption text |
-| `--media` | yes (≥1) | Media file path; **repeat** for a carousel |
+| `--media` | no | Local media file path; **repeat** for multiple |
+| `--media-url` | no | Public URL or Google Drive share link; downloaded locally. Ordered **after** all `--media` entries. Repeatable |
+| `--subreddit` | no | **Reddit:** target community (without `r/`); defaults to your profile |
+| `--visibility` | no | **YouTube:** `PUBLIC`, `UNLISTED`, or `PRIVATE` (default `PRIVATE`) |
+| `--board` | no | **Pinterest:** board to pin to (default first board) |
 | `--at` | no | ISO-8601 schedule time; defaults to now when scheduling |
-| `--now` | no | Publish immediately, inline (runs real Playwright automation) |
+| `--now` | no | Publish immediately, inline (runs real automation) |
 | `--draft` | no | Save as a draft, do not enqueue |
 
-**Mode selection:**
+Per-post options (`--subreddit`, `--visibility`, `--board`) are stored on
+`Post.options` and only apply to the relevant platform; the others ignore them.
+These replaced the old `REDDIT_TARGET_SUBREDDIT` / `YOUTUBE_VISIBILITY` /
+`PINTEREST_BOARD` env vars.
+
+**Auto-resolved type:** when `--type` is omitted, each platform gets the most
+appropriate type for the shared media — no media → `text`; video → `reel` /
+`video` / `short`; multiple images → `carousel` / `image`; single image →
+`image` / `story` / `carousel`. Accounts whose platform can't accept the content
+at all are **skipped** (not created) and reported in the `skipped` array.
+
+**Mode selection** (applies to every created post):
 
 - **Draft** (`--draft`): status `draft`, `scheduledAt = null`, nothing enqueued.
-- **Publish now** (`--now`): prompts for confirmation (auto-confirmed in JSON /
-  non-TTY), runs media processing + platform automation inline, sets status to
-  `posted` or `failed`, and writes a `PublishAttempt`. `--at` is ignored in this
-  mode. **On publish failure the command exits `1`** while the DB records the
-  post as `failed`.
+- **Publish now** (`--now`): prompts **once** for confirmation covering all live
+  targets (auto-confirmed in JSON / non-TTY), then runs media processing +
+  platform automation inline for each, sets each to `posted` or `failed`, and
+  writes a `PublishAttempt`. `--at` is ignored in this mode. If a target fails,
+  its entry in `created` is `{id, platform, status:"failed", error}` and the DB
+  records it as `failed`.
 - **Schedule** (default, neither flag): status `scheduled`, `scheduledAt` =
-  `--at` (or now), a BullMQ job is enqueued. **Requires the worker running** to
-  actually publish (`autopost worker` or `npm run worker`).
+  `--at` (or now), a BullMQ job is enqueued per post. **Requires the worker
+  running** to actually publish (`autopost worker` or `npm run worker`).
 
-`--now` and `--draft` cannot be combined.
+`--now` and `--draft` cannot be combined. If **none** of the selected accounts
+can accept the content, the command errors.
 
-**Type/platform validation** (enforced before creating the post):
+**Type/platform support** (post types per platform, enforced before creating):
 
-| Platform | Allowed `--type` values |
+| Platform | Post types |
 |---|---|
 | `instagram` | `image`, `carousel`, `reel` |
 | `tiktok` | `video`, `carousel` |
+| `twitter` | `text`, `image`, `video` |
+| `linkedin` | `text`, `image`, `video` |
+| `reddit` | `text`, `image`, `video` |
+| `youtube` | `video`, `short` |
+| `bluesky` | `text`, `image` |
+| `threads` | `text`, `image`, `video` |
+| `pinterest` | `image`, `video` |
+| `facebook` | `text`, `image`, `video`, `story` |
 
-Multiple `--media` files are only valid for `--type carousel`. All media paths
-are resolved to absolute paths and must exist, or the command errors.
+Local `--media` paths are resolved to absolute and must exist, or the command
+errors. `--media-url` entries are downloaded into `UPLOAD_DIR` before use.
 
-> **TikTok carousel caveat:** the CLI *accepts* `--type carousel` for TikTok, but
-> TikTok's **web** uploader only accepts video — a photo carousel will be created
-> and then **fail at publish time** with a clear message. Only Instagram truly
-> supports photo carousels. Use `video` for TikTok on web.
+> **TikTok carousel caveat:** TikTok's **web** uploader only accepts video — a
+> photo carousel scheduled for the TikTok *web* path will fail at publish time.
+> Photo carousels go through the official Content Posting API instead
+> (see [TIKTOK_API.md](TIKTOK_API.md)).
+> **Instagram Stories** are not supported (web has no story creation); Facebook
+> Stories (`--type story`) work.
 
-JSON example (schedule):
+**Return shape:** `post` returns `{ "created": [...], "skipped": [...] }`.
+`created` holds one post object per successfully created target; `skipped` holds
+`{account, platform, reason}` for targets that couldn't accept the content.
+
+JSON example (cross-post schedule to two accounts):
 
 ```bash
-$ autopost post --account the.brik --type image \
+$ autopost post --account the.brik --account you.bsky.social \
     --caption "hello world #test" \
     --media ./uploads/test-image.jpg \
     --at 2026-07-01T18:00:00Z --json
 ```
 ```json
 {
-  "id": "cmr1mwtum0001k2jp9oeckbep",
-  "userId": "cldefaultuser000",
-  "socialAccountId": "cmr1i5axd000d58xss4iovmam",
-  "platform": "instagram",
-  "type": "image",
-  "caption": "hello world #test",
-  "scheduledAt": "2026-07-01T18:00:00.000Z",
-  "status": "scheduled",
-  "errorMessage": null,
-  "bullJobId": "cmr1mwtum0001k2jp9oeckbep",
-  "createdAt": "2026-07-01T05:28:02.591Z",
-  "updatedAt": "2026-07-01T05:28:02.591Z",
-  "assets": [
+  "created": [
     {
-      "id": "cmr1mwtum0002k2jp9zo6pfuc",
-      "postId": "cmr1mwtum0001k2jp9oeckbep",
-      "filePath": "/Users/you/social-media-autopost/uploads/test-image.jpg",
-      "processedPath": null,
+      "id": "cmr1mwtum0001k2jp9oeckbep",
+      "userId": "cldefaultuser000",
+      "socialAccountId": "cmr1i5axd000d58xss4iovmam",
+      "platform": "instagram",
       "type": "image",
-      "order": 0,
-      "mimeType": null,
-      "sizeBytes": null,
-      "width": null,
-      "height": null,
-      "durationSecs": null
+      "caption": "hello world #test",
+      "scheduledAt": "2026-07-01T18:00:00.000Z",
+      "status": "scheduled",
+      "errorMessage": null,
+      "bullJobId": "cmr1mwtum0001k2jp9oeckbep",
+      "options": null,
+      "createdAt": "2026-07-01T05:28:02.591Z",
+      "updatedAt": "2026-07-01T05:28:02.591Z",
+      "assets": [
+        {
+          "id": "cmr1mwtum0002k2jp9zo6pfuc",
+          "postId": "cmr1mwtum0001k2jp9oeckbep",
+          "filePath": "/Users/you/social-media-autopost/uploads/test-image.jpg",
+          "processedPath": null,
+          "type": "image",
+          "order": 0,
+          "mimeType": null, "sizeBytes": null,
+          "width": null, "height": null, "durationSecs": null
+        }
+      ],
+      "account": { "id": "cmr1i5axd000d58xss4iovmam", "platform": "instagram", "username": "the.brik", "status": "active", "...": "..." }
     }
   ],
-  "account": { "id": "cmr1i5axd000d58xss4iovmam", "platform": "instagram", "username": "the.brik", "status": "active", "...": "..." }
+  "skipped": []
 }
 ```
 
-A `--draft` result has `status: "draft"`, `scheduledAt: null`, `bullJobId: null`.
-A successful `--now` result has `status: "posted"`.
+Each `created` entry with `--draft` has `status: "draft"`, `scheduledAt: null`,
+`bullJobId: null`; a successful `--now` entry has `status: "posted"`. A target
+the platform can't accept appears in `skipped`, e.g.
+`{ "account": "you.bsky.social", "platform": "bluesky", "reason": "bluesky can't accept this content" }`.
 
-**Exit codes:** `0` on draft/schedule success and on a successful `--now`
-publish; `1` on validation errors, missing media, user abort, or a `--now`
-publish failure.
+**Exit codes:** `0` on draft/schedule success and when `--now` finishes (even if
+some targets failed — inspect the `created`/`skipped` entries); `1` on validation
+errors, missing media, user abort, or when no account can accept the content.
 
 ---
 
@@ -409,7 +469,9 @@ autopost posts list [--status <s>] [--platform <p>] [--limit <n>] [--json]
 ```
 
 - `--status` — filter by `draft|scheduled|processing|posted|failed`.
-- `--platform` — filter by `instagram|tiktok`.
+- `--platform` — filter by any supported platform (`instagram`, `tiktok`,
+  `twitter`, `linkedin`, `reddit`, `youtube`, `bluesky`, `threads`, `pinterest`,
+  `facebook`).
 - `--limit` — max rows, default **20** (must be a positive integer).
 
 The JSON payload is an **array** of posts, each including its `account` and
@@ -554,6 +616,8 @@ start.
 
 ### (a) Connect an account
 
+Browser platform:
+
 ```bash
 # 1. Create the row
 autopost accounts add --platform instagram --username the.brik
@@ -565,36 +629,61 @@ autopost accounts login the.brik
 autopost accounts check the.brik
 ```
 
-### (b) Post now (publishes live, inline)
+Bluesky (no browser — connects instantly):
+
+```bash
+autopost accounts add --platform bluesky --username you.bsky.social \
+  --app-password xxxx-xxxx-xxxx-xxxx
+autopost accounts check you.bsky.social      # validates the app password via API
+```
+
+### (b) Cross-post to many accounts at once
+
+```bash
+# One caption + image → Instagram, Twitter, Bluesky, and Threads.
+# --type is omitted, so each platform gets the right type for the media.
+autopost post \
+  --account the.brik \
+  --account my_x_handle \
+  --account you.bsky.social \
+  --account my_threads \
+  --caption "sunset over the bay #nofilter" \
+  --media ./uploads/sunset.jpg \
+  --at 2026-07-02T14:00:00Z
+
+# Accounts whose platform can't accept the content come back in `skipped`.
+```
+
+### (c) Post now (publishes live, inline)
 
 ```bash
 autopost post \
   --account the.brik \
-  --type image \
   --caption "sunset over the bay #nofilter" \
   --media ./uploads/sunset.jpg \
   --now
 ```
 
-You will be asked to confirm before it publishes to the live account (unless
-`--json` / non-TTY, which auto-confirms).
+You will be asked to confirm once before it publishes to the live account(s)
+(unless `--json` / non-TTY, which auto-confirms).
 
-### (c) Schedule a post + run the worker
+### (d) Schedule with per-post options + run the worker
 
 ```bash
-# Enqueue for a future time
+# Reddit target subreddit + YouTube visibility, scheduled for later.
 autopost post \
-  --account the.brik \
-  --type carousel \
-  --caption "trip recap 1/3" \
-  --media ./uploads/a.jpg --media ./uploads/b.jpg --media ./uploads/c.jpg \
+  --account my_reddit --account my_youtube \
+  --caption "trip recap" \
+  --media ./uploads/clip.mp4 \
+  --subreddit travel \
+  --visibility UNLISTED \
   --at 2026-07-02T14:00:00Z
 
 # In a separate terminal, run the worker so it fires at the scheduled time
 autopost worker
 ```
 
-### (d) Inspect and retry a failed post
+### (e) Inspect and retry a failed post
 
 ```bash
 autopost posts list --status failed --json
@@ -602,7 +691,7 @@ autopost posts get <id> --json          # read errorMessage + attempts
 autopost posts retry <id>               # re-enqueue (worker must be running)
 ```
 
-### (e) Check system status
+### (f) Check system status
 
 ```bash
 autopost status --json
@@ -615,12 +704,19 @@ autopost status --json
 - **Scheduled posts need the worker running.** Enqueuing only writes a Redis job;
   nothing publishes until `autopost worker` (or `npm run worker`) is up. Keep the
   machine awake — a sleeping machine won't fire scheduled jobs.
-- **TikTok photo carousels are unsupported on the web uploader** (video only).
-  The CLI lets you create one but it fails at publish time. Use `--type video`
-  for TikTok; only Instagram supports photo carousels.
-- **Do not bypass 2FA / CAPTCHA.** Always authenticate through
-  `accounts login`. If a session goes stale, `accounts check` marks the account
-  `needs_manual_login` and you must log in again.
+- **Cross-post fan-out.** One `post` invocation with multiple `--account` flags
+  creates one Post per account and returns `{ created, skipped }`. Accounts whose
+  platform can't accept the media (e.g. a video sent to Bluesky) are skipped, not
+  errored.
+- **TikTok photo carousels** go through the official Content Posting API, not the
+  web uploader (web is video-only). Facebook Stories (`--type story`) work;
+  Instagram Stories are not supported.
+- **Per-post options** (`--subreddit`, `--visibility`, `--board`) replaced the
+  old env vars and are stored on `Post.options`.
+- **Do not bypass 2FA / CAPTCHA.** Authenticate browser platforms through
+  `accounts login`; connect Bluesky with an app password. If a session goes
+  stale, `accounts check` marks the account `needs_manual_login`, a webhook
+  (`NOTIFY_WEBHOOK_URL`) fires, and a banner appears in the UI — log in again.
 - **`--now` and the worker run the real Playwright automation** against live
   public accounts. Treat every publish as irreversible.
 - **JSON mode auto-confirms prompts** — `post --now --json` and

@@ -17,10 +17,9 @@ import {
   requireTikTokConfig,
   TIKTOK_SCOPES,
 } from "@/integrations/tiktok";
+import { TIKTOK_OAUTH_STATE_COOKIE } from "../constants";
 
 export const dynamic = "force-dynamic";
-
-export const TIKTOK_OAUTH_STATE_COOKIE = "tiktok_oauth_state";
 
 export async function GET(req: NextRequest) {
   const accountId = req.nextUrl.searchParams.get("accountId");

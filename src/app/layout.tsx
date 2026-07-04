@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
+import { LoggedOutBanner } from "@/components/layout/LoggedOutBanner";
 import { Toaster } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ export default function RootLayout({
             style={{ paddingLeft: "var(--sidebar-width)" }}
           >
             <Header />
+            <LoggedOutBanner />
             <main className="flex-1 overflow-auto">
               <div className="mx-auto w-full max-w-7xl px-6 py-6 md:px-8">
                 {children}

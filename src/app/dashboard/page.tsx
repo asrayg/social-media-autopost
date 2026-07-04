@@ -83,7 +83,8 @@ function PlatformDot({ platform }: { platform: string }) {
     tiktok: "bg-zinc-900",
     twitter: "bg-sky-400",
     linkedin: "bg-blue-600",
-    facebook: "bg-blue-700",
+    reddit: "bg-orange-600",
+    youtube: "bg-red-600",
   };
   return (
     <span

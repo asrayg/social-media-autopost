@@ -11,6 +11,7 @@
 
 import type {
   CreatePostInput,
+  BatchCreatePostInput,
   CreateAccountInput,
   UpdateAccountInput,
 } from "@/lib/validations";
@@ -149,6 +150,21 @@ async function createPost(data: CreatePostInput): Promise<Post> {
   });
 }
 
+/** Result of a cross-post fan-out via POST /api/posts/batch. */
+export interface BatchCreateResult {
+  created: Post[];
+  skipped: { accountId: string; platform?: string; reason: string }[];
+}
+
+async function createBatchPosts(
+  data: BatchCreatePostInput
+): Promise<BatchCreateResult> {
+  return apiFetch<BatchCreateResult>("/api/posts/batch", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 async function getPost(id: string): Promise<Post> {
   return apiFetch<Post>(`/api/posts/${id}`);
 }
@@ -243,6 +259,7 @@ export const api = {
   posts: {
     list: listPosts,
     create: createPost,
+    createBatch: createBatchPosts,
     get: getPost,
     delete: deletePost,
     retry: retryPost,

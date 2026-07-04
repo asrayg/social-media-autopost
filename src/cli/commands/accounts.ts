@@ -35,8 +35,9 @@ import {
   info,
   isJsonMode,
 } from "../lib/output";
+import { PLATFORMS } from "@/lib/platforms";
 
-const SUPPORTED_PLATFORMS = ["instagram", "tiktok"] as const;
+const SUPPORTED_PLATFORMS = PLATFORMS;
 
 // ── accounts list ─────────────────────────────────────────────────────────────
 
@@ -77,8 +78,12 @@ function registerAdd(accounts: Command): void {
         `Platform (${SUPPORTED_PLATFORMS.join(" | ")})`
       )
       .requiredOption("--username <username>", "Account username / handle")
+      .option(
+        "--app-password <password>",
+        "Bluesky app password (from Settings → App Passwords). Connects instantly, no browser login."
+      )
   ).action(
-    wrap(async (opts: { platform: string; username: string }) => {
+    wrap(async (opts: { platform: string; username: string; appPassword?: string }) => {
       const platform = opts.platform.toLowerCase();
       const username = opts.username;
 
@@ -87,6 +92,12 @@ function registerAdd(accounts: Command): void {
           `Unsupported platform "${opts.platform}". Supported: ${SUPPORTED_PLATFORMS.join(", ")}`
         );
       }
+
+      // Bluesky stores API credentials instead of a browser session.
+      const credentials =
+        platform === "bluesky" && opts.appPassword
+          ? { identifier: username, appPassword: opts.appPassword.trim() }
+          : undefined;
 
       // Ensure the FK target exists before inserting the account.
       await ensureMvpUser();
@@ -115,7 +126,11 @@ function registerAdd(accounts: Command): void {
           platform,
           username,
           sessionPath,
-          status: "active",
+          credentials,
+          // Bluesky is usable immediately if an app password was provided;
+          // otherwise it (like browser platforms) needs connecting first.
+          status:
+            platform === "bluesky" && !credentials ? "needs_manual_login" : "active",
         },
       });
 
@@ -140,12 +155,44 @@ function registerLogin(accounts: Command): void {
     accounts
       .command("login")
       .description(
-        "Open a visible Chrome window to the platform login page for manual sign-in"
+        "Open a visible Chrome window to sign in (or, for Bluesky, save an app password)"
       )
       .argument("<idOrUsername>", "Account id or username")
+      .option("--app-password <password>", "Bluesky only: save/update the app password (no browser)")
   ).action(
-    wrap(async (idOrUsername: string) => {
+    wrap(async (idOrUsername: string, opts: { appPassword?: string }) => {
       const account = await resolveAccount(idOrUsername);
+
+      // Bluesky uses the API (handle + app password) — no browser session.
+      if (account.platform === "bluesky") {
+        const creds = (account.credentials ?? {}) as {
+          identifier?: string;
+          appPassword?: string;
+        };
+        const appPassword = opts.appPassword?.trim() || creds.appPassword;
+        if (!appPassword) {
+          throw new Error(
+            "Bluesky uses an app password. Provide one: " +
+              "accounts login " + idOrUsername + " --app-password xxxx-xxxx-xxxx-xxxx " +
+              "(create it at Bluesky → Settings → App Passwords)."
+          );
+        }
+        const updated = await prisma.socialAccount.update({
+          where: { id: account.id },
+          data: {
+            credentials: {
+              identifier: creds.identifier || account.username,
+              appPassword,
+            },
+            status: "active",
+          },
+        });
+        printResult(
+          { id: updated.id, platform: "bluesky", username: updated.username, status: "active" },
+          () => console.log(chalk.green("✔ Bluesky app password saved; account active.")),
+        );
+        return;
+      }
 
       const loginUrl = PLATFORM_LOGIN_URLS[account.platform];
       if (!loginUrl) {
@@ -216,8 +263,10 @@ function isLoginPage(url: string, platform: string): boolean {
       return lower.includes("/i/flow/login") || lower.includes("/login");
     case "linkedin":
       return lower.includes("/login") || lower.includes("/uas/login");
-    case "facebook":
-      return lower.includes("/login") || lower.includes("facebook.com/?");
+    case "reddit":
+      return lower.includes("/login") || lower.includes("/account/login");
+    case "youtube":
+      return lower.includes("accounts.google.com") || lower.includes("/signin");
     default:
       return true;
   }
@@ -233,6 +282,35 @@ function registerCheck(accounts: Command): void {
     wrap(async (idOrUsername: string) => {
       const account = await resolveAccount(idOrUsername);
 
+      // Bluesky: verify the stored app password via an API login (no browser).
+      if (account.platform === "bluesky") {
+        const creds = (account.credentials ?? {}) as {
+          identifier?: string;
+          appPassword?: string;
+        };
+        const identifier = creds.identifier || process.env.BLUESKY_IDENTIFIER || account.username;
+        const appPassword = creds.appPassword || process.env.BLUESKY_APP_PASSWORD;
+        let ok = false;
+        if (appPassword) {
+          const service = (process.env.BLUESKY_SERVICE || "https://bsky.social").replace(/\/+$/, "");
+          const res = await fetch(`${service}/xrpc/com.atproto.server.createSession`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identifier, password: appPassword }),
+          }).catch(() => null);
+          ok = Boolean(res?.ok);
+        }
+        await prisma.socialAccount.update({
+          where: { id: account.id },
+          data: { status: ok ? "active" : "needs_manual_login" },
+        });
+        printResult(
+          { id: account.id, platform: "bluesky", username: account.username, loggedIn: ok, status: ok ? "active" : "needs_manual_login" },
+          () => console.log(ok ? chalk.green("✔ Bluesky credentials valid.") : chalk.red("✖ Bluesky credentials invalid or missing.")),
+        );
+        return;
+      }
+
       const checkUrl = PLATFORM_CHECK_URLS[account.platform];
       if (!checkUrl) {
         throw new Error(`Unsupported platform: ${account.platform}`);
@@ -244,10 +322,17 @@ function registerCheck(accounts: Command): void {
         ? null
         : ora({ text: "Checking session…", stream: process.stderr }).start();
 
-      const browser = await chromium.launchPersistentContext(account.sessionPath, {
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      });
+      let browser;
+      try {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: true,
+        });
+      } catch {
+        browser = await chromium.launchPersistentContext(account.sessionPath, {
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+      }
 
       let loggedIn = false;
       try {

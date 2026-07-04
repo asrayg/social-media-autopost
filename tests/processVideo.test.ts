@@ -10,16 +10,22 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 let tmpDir: string;
 let sampleMp4: string;
+let verticalMp4: string;
+let longVerticalMp4: string;
 let emptyFile: string;
 
 /**
  * Generate a small, self-contained H.264 test video with ffmpeg so the suite
  * doesn't depend on any file in uploads/ (which is gitignored and absent in CI).
  */
-async function generateSampleMp4(outPath: string): Promise<void> {
+async function generateSampleMp4(
+  outPath: string,
+  size = "320x240",
+  durationSecs = 1
+): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
-      .input("testsrc=size=320x240:rate=15:duration=1")
+      .input(`testsrc=size=${size}:rate=15:duration=${durationSecs}`)
       .inputFormat("lavfi")
       .outputOptions(["-c:v libx264", "-pix_fmt yuv420p", "-movflags +faststart"])
       .output(outPath)
@@ -34,6 +40,12 @@ beforeAll(async () => {
 
   sampleMp4 = path.join(tmpDir, "sample.mp4");
   await generateSampleMp4(sampleMp4);
+
+  verticalMp4 = path.join(tmpDir, "vertical.mp4");
+  await generateSampleMp4(verticalMp4, "320x568", 1);
+
+  longVerticalMp4 = path.join(tmpDir, "long-vertical.mp4");
+  await generateSampleMp4(longVerticalMp4, "320x568", 61);
 
   emptyFile = path.join(tmpDir, "empty.mp4");
   await fs.writeFile(emptyFile, "");
@@ -76,6 +88,30 @@ describe("validateVideoFile", () => {
     const result = await validateVideoFile(sampleMp4, "tiktok");
     expect(result.valid).toBe(true);
     expect(result.durationSecs).toBeGreaterThan(0);
+  });
+
+  it("returns valid=true for youtube videos", async () => {
+    const result = await validateVideoFile(sampleMp4, "youtube");
+    expect(result.valid).toBe(true);
+    expect(result.durationSecs).toBeGreaterThan(0);
+  });
+
+  it("returns valid=true for youtube shorts when vertical and under 60 seconds", async () => {
+    const result = await validateVideoFile(verticalMp4, "youtube_short");
+    expect(result.valid).toBe(true);
+    expect(result.durationSecs).toBeGreaterThan(0);
+  });
+
+  it("rejects youtube shorts when video is landscape", async () => {
+    const result = await validateVideoFile(sampleMp4, "youtube_short");
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/vertical/i);
+  });
+
+  it("rejects youtube shorts when duration is over 60 seconds", async () => {
+    const result = await validateVideoFile(longVerticalMp4, "youtube_short");
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/60 seconds/i);
   });
 
   it("fails for a nonexistent file", async () => {

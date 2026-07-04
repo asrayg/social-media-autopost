@@ -36,7 +36,51 @@ const PLATFORM_LIMITS = {
       { label: '9:16', ratio: 9 / 16 },
     ],
   },
+  twitter: {
+    maxSizeBytes: 512 * 1024 * 1024,
+    maxDurationSecs: 140,
+    validAspectRatios: [
+      { label: '16:9', ratio: 16 / 9 },
+      { label: '1:1', ratio: 1 },
+      { label: '9:16', ratio: 9 / 16 },
+    ],
+  },
+  linkedin: {
+    maxSizeBytes: 5 * 1024 * 1024 * 1024,
+    maxDurationSecs: 600,
+    validAspectRatios: [
+      { label: '16:9', ratio: 16 / 9 },
+      { label: '1:1', ratio: 1 },
+      { label: '9:16', ratio: 9 / 16 },
+    ],
+  },
+  reddit: {
+    maxSizeBytes: 1 * 1024 * 1024 * 1024,
+    maxDurationSecs: 15 * 60,
+    validAspectRatios: [
+      { label: '16:9', ratio: 16 / 9 },
+      { label: '1:1', ratio: 1 },
+      { label: '9:16', ratio: 9 / 16 },
+    ],
+  },
+  youtube: {
+    maxSizeBytes: 256 * 1024 * 1024 * 1024,
+    maxDurationSecs: 12 * 60 * 60,
+    validAspectRatios: [
+      { label: '16:9', ratio: 16 / 9 },
+      { label: '9:16', ratio: 9 / 16 },
+    ],
+  },
+  youtube_short: {
+    maxSizeBytes: 256 * 1024 * 1024 * 1024,
+    maxDurationSecs: 60,
+    validAspectRatios: [
+      { label: '9:16', ratio: 9 / 16 },
+    ],
+  },
 } as const
+
+export type VideoPlatform = keyof typeof PLATFORM_LIMITS
 
 // Tolerance for aspect ratio comparison
 const ASPECT_RATIO_TOLERANCE = 0.05
@@ -45,7 +89,7 @@ export async function processVideoForPlatform(
   inputPath: string,
   outputDir: string,
   postId: string,
-  platform: 'instagram' | 'tiktok'
+  platform: VideoPlatform
 ): Promise<VideoProcessingResult> {
   // Validate before processing
   const validation = await validateVideoFile(inputPath, platform)
@@ -103,12 +147,12 @@ export async function processVideoForPlatform(
 function resolveTargetDimensions(
   inputWidth: number,
   inputHeight: number,
-  platform: 'instagram' | 'tiktok'
+  platform: VideoPlatform
 ): { targetWidth: number; targetHeight: number } {
   const inputAspect = inputWidth / inputHeight
 
-  if (platform === 'tiktok') {
-    // TikTok only supports 9:16
+  if (platform === 'tiktok' || platform === 'youtube_short') {
+    // TikTok and YouTube Shorts are normalized to 9:16.
     return dimensionsFor916(inputWidth, inputHeight, inputAspect)
   }
 
@@ -165,7 +209,7 @@ function runFfmpeg(
   outputPath: string,
   targetWidth: number,
   targetHeight: number,
-  platform: 'instagram' | 'tiktok'
+  platform: VideoPlatform
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let command = ffmpeg(inputPath)
@@ -185,9 +229,8 @@ function runFfmpeg(
       )
       .format('mp4')
 
-    // TikTok: cap at 10 minutes just in case
-    if (platform === 'tiktok') {
-      command = command.outputOptions(['-t 600'])
+    if (platform === 'tiktok' || platform === 'youtube_short') {
+      command = command.outputOptions(['-t', String(PLATFORM_LIMITS[platform].maxDurationSecs)])
     }
 
     command
@@ -240,7 +283,7 @@ export async function validateVideoFile(
     return { valid: false, error: 'File is empty' }
   }
 
-  const platformKey = platform as 'instagram' | 'tiktok'
+  const platformKey = platform as VideoPlatform
   const limits = PLATFORM_LIMITS[platformKey]
 
   if (!limits) {
@@ -299,10 +342,24 @@ export async function validateVideoFile(
   }
 
   if (durationSecs > limits.maxDurationSecs) {
-    const minutes = (limits.maxDurationSecs / 60).toFixed(0)
+    const limit =
+      limits.maxDurationSecs > 60
+        ? `${(limits.maxDurationSecs / 60).toFixed(0)} minutes`
+        : `${limits.maxDurationSecs} seconds`
     return {
       valid: false,
-      error: `Video duration ${durationSecs.toFixed(1)}s exceeds ${platform} limit of ${minutes} minutes`,
+      error: `Video duration ${durationSecs.toFixed(1)}s exceeds ${platform} limit of ${limit}`,
+    }
+  }
+
+  if (platformKey === 'youtube_short') {
+    const width = videoStream.width ?? 0
+    const height = videoStream.height ?? 0
+    if (width >= height) {
+      return {
+        valid: false,
+        error: 'YouTube Shorts require a vertical video',
+      }
     }
   }
 

@@ -22,8 +22,16 @@ import { getRedisConnection, closeRedisConnection } from "@/lib/redis";
 import type { PublishJobData } from "@/lib/queue";
 import { publishToInstagram } from "@/automation/instagram";
 import { publishToTikTok } from "@/automation/tiktok";
+import { publishToTwitter } from "@/automation/twitter";
+import { publishToLinkedIn } from "@/automation/linkedin";
+import { publishToReddit } from "@/automation/reddit";
+import { publishToYouTube } from "@/automation/youtube";
+import { publishToBluesky } from "@/automation/bluesky";
+import { publishToThreads } from "@/automation/threads";
+import { publishToPinterest } from "@/automation/pinterest";
+import { publishToFacebook } from "@/automation/facebook";
 import { processImageForInstagram } from "@/media/processImage";
-import { processVideoForPlatform } from "@/media/processVideo";
+import { processVideoForPlatform, type VideoPlatform } from "@/media/processVideo";
 
 // ── Initialisation ────────────────────────────────────────────────────────────
 
@@ -126,17 +134,16 @@ const worker = new Worker<PublishJobData>(
             processedPath: result.outputPath,
           });
         } else if (asset.type === "video") {
-          if (mediaPlatform !== "instagram" && mediaPlatform !== "tiktok") {
-            throw new Error(
-              `Unsupported platform "${post.account.platform}" for video processing`
-            );
-          }
+          const videoPlatform =
+            mediaPlatform === "youtube" && post.type === "short"
+              ? "youtube_short"
+              : mediaPlatform;
 
           const result = await processVideoForPlatform(
             asset.filePath,
             env.PROCESSED_DIR,
             postId,
-            mediaPlatform
+            videoPlatform as VideoPlatform
           );
 
           await prisma.postAsset.update({
@@ -196,6 +203,22 @@ const worker = new Worker<PublishJobData>(
         await publishToInstagram(post);
       } else if (platform === "tiktok") {
         await publishToTikTok(post);
+      } else if (platform === "twitter") {
+        await publishToTwitter(post);
+      } else if (platform === "linkedin") {
+        await publishToLinkedIn(post);
+      } else if (platform === "reddit") {
+        await publishToReddit(post);
+      } else if (platform === "youtube") {
+        await publishToYouTube(post);
+      } else if (platform === "bluesky") {
+        await publishToBluesky(post);
+      } else if (platform === "threads") {
+        await publishToThreads(post);
+      } else if (platform === "pinterest") {
+        await publishToPinterest(post);
+      } else if (platform === "facebook") {
+        await publishToFacebook(post);
       } else {
         throw new Error(
           `Unsupported platform "${post.account.platform}" for postId=${postId}`

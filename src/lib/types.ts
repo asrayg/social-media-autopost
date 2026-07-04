@@ -3,8 +3,9 @@
  * Used across server components, client components, and API helpers.
  */
 
-export type Platform = "instagram" | "tiktok" | "twitter" | "linkedin" | "facebook";
-export type PostType = "image" | "carousel" | "reel" | "video" | "text";
+import type { Platform, PostType } from "@/lib/platforms";
+
+export type { Platform, PostType };
 export type PostStatus =
   | "draft"
   | "scheduled"

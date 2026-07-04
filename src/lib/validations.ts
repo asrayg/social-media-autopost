@@ -6,13 +6,18 @@
  */
 
 import { z } from "zod";
+import {
+  PLATFORMS as PLATFORM_VALUES,
+  POST_TYPES as POST_TYPE_VALUES,
+  validatePlatformAssets,
+} from "@/lib/platforms";
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-export const PLATFORMS = ["instagram", "tiktok", "twitter", "linkedin", "facebook"] as const;
+export const PLATFORMS = PLATFORM_VALUES;
 export type Platform = (typeof PLATFORMS)[number];
 
-export const POST_TYPES = ["image", "carousel", "reel", "video", "text"] as const;
+export const POST_TYPES = POST_TYPE_VALUES;
 export type PostType = (typeof POST_TYPES)[number];
 
 export const POST_STATUSES = [
@@ -73,9 +78,80 @@ export const CreatePostSchema = z.object({
     )
     .optional()
     .default([]),
+
+  /**
+   * Per-post, platform-specific options set from the UI/CLI:
+   *   - subreddit  (Reddit target community)
+   *   - visibility (YouTube: PUBLIC | UNLISTED | PRIVATE)
+   *   - board      (Pinterest board name)
+   */
+  options: z
+    .object({
+      subreddit: z.string().trim().max(100).optional(),
+      visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]).optional(),
+      board: z.string().trim().max(100).optional(),
+    })
+    .optional(),
+}).superRefine((value, ctx) => {
+  const error = validatePlatformAssets({
+    platform: value.platform,
+    type: value.type,
+    assets: value.assetPaths,
+  });
+
+  if (error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["assetPaths"],
+      message: error,
+    });
+  }
 });
 
 export type CreatePostInput = z.infer<typeof CreatePostSchema>;
+
+/**
+ * Body for POST /api/posts/batch — cross-post to multiple accounts at once.
+ * The post type is auto-resolved per platform from the shared media.
+ */
+export const BatchCreatePostSchema = z
+  .object({
+    socialAccountIds: z
+      .array(z.string().min(1))
+      .min(1, "select at least one account"),
+    caption: z.string().max(2200, "caption too long").default(""),
+    scheduledAt: z
+      .string()
+      .datetime({ message: "scheduledAt must be a valid ISO-8601 datetime" })
+      .optional()
+      .nullable(),
+    assetPaths: z
+      .array(
+        z.object({
+          filePath: z.string().min(1),
+          filename: z.string().min(1),
+          size: z.number().int().positive(),
+          mimeType: z.string().min(1),
+          type: z.enum(["image", "video"]),
+          order: z.number().int().min(0).optional().default(0),
+        })
+      )
+      .optional()
+      .default([]),
+    options: z
+      .object({
+        subreddit: z.string().trim().max(100).optional(),
+        visibility: z.enum(["PUBLIC", "UNLISTED", "PRIVATE"]).optional(),
+        board: z.string().trim().max(100).optional(),
+      })
+      .optional(),
+  })
+  .refine((v) => v.caption.trim().length > 0 || v.assetPaths.length > 0, {
+    message: "provide a caption or at least one media file",
+    path: ["caption"],
+  });
+
+export type BatchCreatePostInput = z.infer<typeof BatchCreatePostSchema>;
 
 /**
  * Query params accepted by GET /api/posts.
@@ -115,6 +191,18 @@ export const CreateAccountSchema = z.object({
    * account. If omitted, the API will derive a path from SESSIONS_DIR.
    */
   sessionPath: z.string().optional(),
+
+  /**
+   * API credentials for non-browser platforms (currently Bluesky):
+   * { identifier, appPassword, service }. Stored on the account.
+   */
+  credentials: z
+    .object({
+      identifier: z.string().trim().optional(),
+      appPassword: z.string().trim().optional(),
+      service: z.string().trim().url().optional(),
+    })
+    .optional(),
 });
 
 export type CreateAccountInput = z.infer<typeof CreateAccountSchema>;

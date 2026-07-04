@@ -19,7 +19,7 @@ model User {
 model SocialAccount {
   id          String   @id @default(cuid())
   userId      String
-  platform    String   // instagram | tiktok
+  platform    String   // instagram | tiktok | twitter | linkedin | reddit | youtube
   username    String
   sessionPath String
   status      String   @default("active") // active | needs_manual_login | failed
@@ -34,6 +34,9 @@ model SocialAccount {
   apiTokenExpiresAt DateTime? // When apiAccessToken expires (UTC)
   apiScope          String?   // Space/comma-separated granted scopes
   apiOpenId         String?   // TikTok open_id for the authorized user
+  // ── API credentials for non-browser platforms (e.g. Bluesky) ────────────────
+  // JSON, e.g. { identifier: "name.bsky.social", appPassword: "xxxx-..." }.
+  credentials Json?
   user        User     @relation(fields: [userId], references: [id])
   posts       Post[]
   @@unique([userId, platform, username])
@@ -43,13 +46,16 @@ model Post {
   id              String   @id @default(cuid())
   userId          String
   socialAccountId String
-  platform        String   // instagram | tiktok
-  type            String   // image | carousel | reel | video
+  platform        String   // instagram | tiktok | twitter | linkedin | reddit | youtube
+  type            String   // image | carousel | reel | video | text | short
   caption         String
   scheduledAt     DateTime?
   status          String   @default("draft") // draft | scheduled | processing | posted | failed
   errorMessage    String?
   bullJobId       String?
+  // Per-post, platform-specific options set from the UI/CLI, e.g.
+  // { subreddit?: string, visibility?: "PUBLIC"|"UNLISTED"|"PRIVATE", board?: string }
+  options         Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id])
