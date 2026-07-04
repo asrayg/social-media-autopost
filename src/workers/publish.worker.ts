@@ -26,6 +26,10 @@ import { publishToTwitter } from "@/automation/twitter";
 import { publishToLinkedIn } from "@/automation/linkedin";
 import { publishToReddit } from "@/automation/reddit";
 import { publishToYouTube } from "@/automation/youtube";
+import { publishToBluesky } from "@/automation/bluesky";
+import { publishToThreads } from "@/automation/threads";
+import { publishToPinterest } from "@/automation/pinterest";
+import { publishToFacebook } from "@/automation/facebook";
 import { processImageForInstagram } from "@/media/processImage";
 import { processVideoForPlatform, type VideoPlatform } from "@/media/processVideo";
 
@@ -207,6 +211,14 @@ const worker = new Worker<PublishJobData>(
         await publishToReddit(post);
       } else if (platform === "youtube") {
         await publishToYouTube(post);
+      } else if (platform === "bluesky") {
+        await publishToBluesky(post);
+      } else if (platform === "threads") {
+        await publishToThreads(post);
+      } else if (platform === "pinterest") {
+        await publishToPinterest(post);
+      } else if (platform === "facebook") {
+        await publishToFacebook(post);
       } else {
         throw new Error(
           `Unsupported platform "${post.account.platform}" for postId=${postId}`

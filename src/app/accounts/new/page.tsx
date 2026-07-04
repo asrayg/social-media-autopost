@@ -9,6 +9,10 @@ import {
   Music2,
   Twitter,
   Youtube,
+  Facebook,
+  Cloud,
+  AtSign,
+  Pin,
   MessageCircle,
   ArrowLeft,
   Loader2,
@@ -84,6 +88,30 @@ const PLATFORMS: PlatformOption[] = [
     icon: <Youtube className="h-4 w-4" />,
     dot: "bg-red-600",
   },
+  {
+    id: "bluesky",
+    label: "Bluesky",
+    icon: <Cloud className="h-4 w-4" />,
+    dot: "bg-sky-400",
+  },
+  {
+    id: "threads",
+    label: "Threads",
+    icon: <AtSign className="h-4 w-4" />,
+    dot: "bg-zinc-900",
+  },
+  {
+    id: "pinterest",
+    label: "Pinterest",
+    icon: <Pin className="h-4 w-4" />,
+    dot: "bg-red-600",
+  },
+  {
+    id: "facebook",
+    label: "Facebook",
+    icon: <Facebook className="h-4 w-4" />,
+    dot: "bg-blue-600",
+  },
 ];
 
 function loginHost(platform: Platform): string {
@@ -94,6 +122,10 @@ function loginHost(platform: Platform): string {
     linkedin: "linkedin.com",
     reddit: "reddit.com",
     youtube: "youtube.com",
+    bluesky: "bsky.app",
+    threads: "threads.net",
+    pinterest: "pinterest.com",
+    facebook: "facebook.com",
   };
   return hosts[platform];
 }

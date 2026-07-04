@@ -13,6 +13,10 @@ import {
   Music2,
   Twitter,
   Youtube,
+  Facebook,
+  Cloud,
+  AtSign,
+  Pin,
   MessageCircle,
   Loader2,
   AlertCircle,
@@ -976,6 +980,10 @@ function PlatformIcon({
   if (platform === "twitter") return <Twitter className={className} />;
   if (platform === "linkedin") return <Linkedin className={className} />;
   if (platform === "youtube") return <Youtube className={className} />;
+  if (platform === "facebook") return <Facebook className={className} />;
+  if (platform === "bluesky") return <Cloud className={className} />;
+  if (platform === "threads") return <AtSign className={className} />;
+  if (platform === "pinterest") return <Pin className={className} />;
   return <MessageCircle className={className} />;
 }
 
@@ -987,6 +995,10 @@ function platformDotClass(platform: Platform): string {
     linkedin: "bg-blue-700",
     reddit: "bg-orange-600",
     youtube: "bg-red-600",
+    bluesky: "bg-sky-400",
+    threads: "bg-zinc-900",
+    pinterest: "bg-red-600",
+    facebook: "bg-blue-600",
   };
   return classes[platform];
 }
@@ -999,6 +1011,10 @@ function platformSummary(platform: Platform): string {
     linkedin: "Text, images & video",
     reddit: "Text, images & video",
     youtube: "Videos & shorts",
+    bluesky: "Text & images",
+    threads: "Text, images & video",
+    pinterest: "Image & video pins",
+    facebook: "Text, images & video",
   };
   return summaries[platform];
 }

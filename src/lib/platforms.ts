@@ -5,6 +5,10 @@ export const PLATFORMS = [
   "linkedin",
   "reddit",
   "youtube",
+  "bluesky",
+  "threads",
+  "pinterest",
+  "facebook",
 ] as const;
 
 export type Platform = (typeof PLATFORMS)[number];
@@ -144,6 +148,84 @@ export const PLATFORM_POST_TYPES: Record<
     short: {
       label: "Short",
       description: "Vertical video up to 60s",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["video"],
+    },
+  },
+  bluesky: {
+    text: {
+      label: "Text",
+      description: "Text-only post (300 chars)",
+      minAssets: 0,
+      maxAssets: 0,
+      allowedAssetTypes: [],
+    },
+    image: {
+      label: "Images",
+      description: "Up to four images",
+      minAssets: 1,
+      maxAssets: 4,
+      allowedAssetTypes: ["image"],
+    },
+  },
+  threads: {
+    text: {
+      label: "Text",
+      description: "Text-only post (500 chars)",
+      minAssets: 0,
+      maxAssets: 0,
+      allowedAssetTypes: [],
+    },
+    image: {
+      label: "Images",
+      description: "Up to ten images",
+      minAssets: 1,
+      maxAssets: 10,
+      allowedAssetTypes: ["image"],
+    },
+    video: {
+      label: "Video",
+      description: "Single video post",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["video"],
+    },
+  },
+  pinterest: {
+    image: {
+      label: "Pin",
+      description: "Image Pin",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["image"],
+    },
+    video: {
+      label: "Video Pin",
+      description: "Video Pin",
+      minAssets: 1,
+      maxAssets: 1,
+      allowedAssetTypes: ["video"],
+    },
+  },
+  facebook: {
+    text: {
+      label: "Text",
+      description: "Text-only post",
+      minAssets: 0,
+      maxAssets: 0,
+      allowedAssetTypes: [],
+    },
+    image: {
+      label: "Images",
+      description: "Image post",
+      minAssets: 1,
+      maxAssets: 10,
+      allowedAssetTypes: ["image"],
+    },
+    video: {
+      label: "Video",
+      description: "Single video post",
       minAssets: 1,
       maxAssets: 1,
       allowedAssetTypes: ["video"],
