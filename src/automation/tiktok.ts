@@ -41,6 +41,7 @@ import {
   getValidAccessToken,
   publishPhotoCarousel,
 } from '@/integrations/tiktok'
+import { postCarouselViaAndroid } from './tiktok-android'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -74,12 +75,20 @@ const UPLOAD_POLL_INTERVAL_MS = 2_000
 export async function postToTikTok(post: PostWithAssets): Promise<void> {
   const { account } = post
 
-  // ── Native photo carousels via the official Content Posting API ─────────────
+  // ── Native photo carousels ──────────────────────────────────────────────────
   // TikTok's web/desktop uploader has NO photo-carousel feature (video-only), so
-  // a real swipeable carousel (media_type PHOTO) can ONLY be posted through the
-  // official API. Route carousels there; videos continue via browser automation.
+  // a real swipeable carousel (media_type PHOTO) can only be created two ways:
+  //   - "android" (default): drive TikTok Lite on a logged-in Android emulator
+  //     via adb/uiautomator (verified working, no app audit needed).
+  //   - "api": the official Content Posting API (needs an approved app audit).
+  // Videos continue via the browser flow below regardless.
   if (post.type === 'carousel' || post.type === 'photo') {
-    await postCarouselViaApi(post)
+    const mode = (process.env.TIKTOK_CAROUSEL_MODE ?? 'android').toLowerCase()
+    if (mode === 'api') {
+      await postCarouselViaApi(post)
+    } else {
+      await postCarouselViaAndroid(post)
+    }
     return
   }
 

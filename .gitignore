@@ -67,3 +67,7 @@ scripts/li-post.ts
 scripts/login-any.ts
 scripts/ensure-accounts.ts
 scripts/shoot-newpost.ts
+# Local Android-emulator (TikTok carousel) experiments
+scripts/android-*.sh
+scripts/android-*.ts
+scripts/tt-android-*.ts
